@@ -1,6 +1,6 @@
 # Roadmap
 
-## 0.1 — Foundation
+## 0.1 — Foundation ✅
 
 - Valid Codex plugin manifest.
 - Separate pet, skin, and management skills.
@@ -8,12 +8,15 @@
 - Safety, architecture, contribution, and security documentation.
 - Dependency-free validation tests that can run on Windows, macOS, and Linux.
 
-## 0.2 — Pet MVP
+## 0.2 — Desktop Pet MVP ✅
 
-- One-image input workflow built on the supported Codex pet pipeline.
+- One-image input workflow built on the supported Codex `hatch-pet` pipeline.
 - User-defined animation intent for working, waiting, ready, and failed states.
-- Contact-sheet and motion-preview review.
-- Desktop v2 package plus a web-compatible export path where supported.
+- Mandatory contact-sheet, direction, and motion-preview review before installation.
+- Strict desktop v2 package validation for the 1536×2288 extended atlas.
+- Safe installation, explicit replacement, managed backup, and restore commands.
+
+Web upload/export is not claimed by `0.2.0`; it will be added only when an official, testable target contract is available.
 
 ## 0.3 — Skin Studio MVP
 

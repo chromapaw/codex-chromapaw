@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chromapaw/codex-chromapaw/schemas/pet.schema.json",
+  "title": "ChromaPaw Codex v2 pet package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "displayName",
+    "description",
+    "spriteVersionNumber",
+    "spritesheetPath"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "spriteVersionNumber": {
+      "const": 2
+    },
+    "spritesheetPath": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+\\.(?:[Pp][Nn][Gg]|[Ww][Ee][Bb][Pp])$"
+    }
+  }
+}

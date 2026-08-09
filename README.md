@@ -2,9 +2,9 @@
 
 Turn one image into a custom Codex skin or animated pet.
 
-> Early-stage open-source project. Pet generation is designed around Codex's supported custom-pet workflow. Rich background skins are packaged separately and will only be activated through a reversible local runtime.
+> Version 0.2 ships the desktop Pet MVP. Visual generation and QA use Codex's installed `hatch-pet` workflow; rich background skins remain portable packages until a reversible runtime is available.
 
-[中文说明](#中文说明) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
+[中文说明](#中文说明) · [Pet MVP](docs/PET_MVP.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
 ## Vision
 
@@ -16,14 +16,15 @@ ChromaPaw aims to make Codex customization approachable to everyone:
 4. Validate it before installation.
 5. Switch or restore safely.
 
-## Planned capabilities
+## Capabilities
 
 ### Animated pets
 
 - Preserve the subject's recognizable silhouette, palette, face, clothing, and props.
 - Generate task-aware animation states such as working, waiting, ready, and failed.
-- Build and validate a Codex-compatible local pet package.
+- Build and validate a Codex-compatible desktop v2 pet package.
 - Produce contact sheets and motion previews before installation.
+- Refuse silent replacement, back up an existing matching id, and restore managed backups.
 
 ### Layered skins
 
@@ -34,14 +35,15 @@ ChromaPaw aims to make Codex customization approachable to everyone:
 
 ## Current status
 
-Version `0.1.0` establishes the plugin manifest, three focused skills, the skin-package contract, validation scripts, documentation, and automated tests. A production skin runtime is intentionally not included yet.
+Version `0.2.0` adds the one-image desktop Pet MVP: normalized animation intent, the supported full v2 hatch workflow, a strict package validator, and reversible local installation. A production skin runtime is intentionally not included yet.
 
 | Area | Status |
 | --- | --- |
 | Plugin manifest and skill routing | Available |
-| Pet creation workflow | Initial workflow |
+| One-image desktop Pet MVP | Available |
+| Pet package validation/install/restore | Available |
 | Skin package generation contract | Initial workflow |
-| Package validator | Available |
+| Skin package validator | Available |
 | Live Codex skin activation | Planned |
 | Windows runtime | Planned |
 | macOS runtime | Planned |
@@ -51,6 +53,34 @@ Version `0.1.0` establishes the plugin manifest, three focused skills, the skin-
 - `$create-chromapaw-pet` — create and validate an animated Codex pet from an image.
 - `$create-chromapaw-skin` — create a layered, portable skin package from an image.
 - `$manage-chromapaw` — inspect packages and use safe preview, activation, or recovery paths.
+
+## Pet quick start
+
+In Codex, attach one character image and ask:
+
+```text
+Use $create-chromapaw-pet to make this my Codex pet. While a task is running,
+have it dribble and shoot a basketball. When the task finishes, have it dance
+with the basketball.
+```
+
+The skill prepares the request, delegates the complete 8×11 animation workflow to `hatch-pet`, presents QA media, stages the package, and installs only after validation. Exact runtime state timing remains controlled by Codex; the requested actions are mapped onto the closest supported animation rows.
+
+For an already generated package:
+
+```bash
+python scripts/validate_pet_package.py path/to/pet-package --json
+python scripts/install_pet.py path/to/pet-package --json
+```
+
+Replacing an existing id is explicit and creates a backup:
+
+```bash
+python scripts/install_pet.py path/to/pet-package --replace --json
+python scripts/restore_pet.py backup-directory-name --replace --json
+```
+
+See [docs/PET_MVP.md](docs/PET_MVP.md) for the package contract and limitations.
 
 ## Repository layout
 
@@ -77,6 +107,7 @@ Run the repository checks with Python 3.10 or later:
 
 ```bash
 python -m unittest discover -s tests -v
+python scripts/validate_pet_package.py --help
 python scripts/validate_skin_package.py --help
 ```
 
@@ -94,4 +125,8 @@ ChromaPaw 是一个面向 Codex 的开源个性化工坊，目标是让用户只
 - 包含背景、环境元素、前景装饰和半透明面板的完整主题皮肤；
 - 可以预览、验证、切换和恢复的本地资产包。
 
-当前 `0.1.0` 是项目基础版本：已经建立插件结构、三项核心技能、皮肤包规范、验证脚本与自动化测试。完整皮肤运行时将在后续版本中实现。
+当前 `0.2.0` 已实现桌面宠物 MVP：上传一张参考图后，可以整理工作中、等待、完成和失败等动作意图，调用完整的 Codex v2 宠物生成与 QA 流程，并在安装前校验 `8×11` 精灵图。安装同名宠物时必须明确确认，旧版本会先备份，之后可以恢复。
+
+例如，你可以直接说：“任务进行时让它拍篮球，任务完成后让它用篮球跳舞。”ChromaPaw 会把这些要求映射到 Codex 支持的动画行；任务状态本身仍由 Codex 控制。
+
+完整主题皮肤的生成规范已经存在，但实时应用皮肤的可逆运行时仍将在后续版本中实现。

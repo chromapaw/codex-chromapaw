@@ -18,4 +18,4 @@ ChromaPaw must:
 - refuse activation when the Codex version is unsupported;
 - avoid collecting or uploading user images without an explicit workflow step.
 
-The initial `0.1.x` line does not include a live skin runtime. Any future runtime will require a dedicated threat model and security review before release.
+The `0.2.x` line includes local desktop-pet package installation and managed backups, but no live skin runtime. Any future skin runtime will require a dedicated threat model and security review before release.

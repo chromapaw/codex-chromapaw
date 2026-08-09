@@ -10,14 +10,14 @@ Manage customization state without assuming that a live skin runtime is installe
 ## Operation selection
 
 - **Inspect:** list package metadata, paths, validation state, and runtime compatibility without changing anything.
-- **Validate:** run the skin package validator or the supported pet validator and report every failure.
+- **Validate:** run `scripts/validate_skin_package.py` for skins or `scripts/validate_pet_package.py` for desktop v2 pets and report every failure.
 - **Preview:** open or display the package preview without activating it.
 - **Activate:** proceed only when a supported, version-gated runtime is present and the user explicitly requested activation.
-- **Restore:** use a verified backup created by the same runtime; never reconstruct unknown user settings from guesses.
+- **Restore:** for pets, inspect a package under `pets/.chromapaw-backups/` and use `scripts/restore_pet.py`; for skins, use a verified backup created by the same runtime. Never reconstruct unknown user settings from guesses.
 - **Remove:** delete only the selected ChromaPaw asset after confirming the resolved target path.
 
 ## Required safety model
 
 Read [references/safety-model.md](references/safety-model.md) before any activate, restore, or remove operation.
 
-Version `0.1.x` includes package management and validation instructions, not a production live-skin runtime. If activation is requested without a supported runtime, stop after validation and preview, then explain the missing component.
+Version `0.2.x` includes a validated desktop-pet install, backup, and restore path. It still does not include a production live-skin runtime. If skin activation is requested without a supported runtime, stop after validation and preview, then explain the missing component.
