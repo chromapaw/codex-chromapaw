@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage ChromaPaw"
+  short_description: "Preview, validate, switch, or restore customizations"
+  default_prompt: "Use $manage-chromapaw to inspect or restore my ChromaPaw customization."

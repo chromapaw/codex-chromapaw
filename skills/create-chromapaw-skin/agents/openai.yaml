@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create ChromaPaw Skin"
+  short_description: "Build a layered Codex skin from one image"
+  default_prompt: "Use $create-chromapaw-skin to turn this image into a complete Codex skin."

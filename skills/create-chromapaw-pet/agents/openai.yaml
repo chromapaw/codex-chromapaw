@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create ChromaPaw Pet"
+  short_description: "Turn one image into an animated Codex pet"
+  default_prompt: "Use $create-chromapaw-pet to turn this image into an animated Codex pet."

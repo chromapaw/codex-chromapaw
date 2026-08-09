@@ -1,0 +1,34 @@
+{
+  "name": "codex-chromapaw",
+  "version": "0.1.0",
+  "description": "Turn one image into a custom Codex skin or animated pet.",
+  "author": {
+    "name": "ChromaPaw Community",
+    "url": "https://github.com/chromapaw"
+  },
+  "homepage": "https://github.com/chromapaw/codex-chromapaw",
+  "repository": "https://github.com/chromapaw/codex-chromapaw",
+  "license": "Apache-2.0",
+  "keywords": [
+    "codex",
+    "custom-pet",
+    "desktop-theme",
+    "image-generation",
+    "skin"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ChromaPaw for Codex",
+    "shortDescription": "Create Codex skins and animated pets from one image.",
+    "longDescription": "ChromaPaw turns a reference image into a validated animated Codex pet or a layered skin package, with preview and recovery-oriented workflows.",
+    "developerName": "ChromaPaw Community",
+    "category": "Creativity",
+    "capabilities": [],
+    "websiteURL": "https://github.com/chromapaw/codex-chromapaw",
+    "defaultPrompt": [
+      "Turn this image into an animated Codex pet.",
+      "Turn this image into a layered Codex skin.",
+      "Inspect or restore my ChromaPaw customization."
+    ]
+  }
+}
