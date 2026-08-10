@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 — 2026-08-10
+
+- Add source-bound semantic theme profiles before skin scene expansion and packaging.
+- Derive motifs, forbidden elements, and four depth descriptions from the current upload and user intent instead of a fixed beach example.
+- Reject profile/reference SHA-256 mismatches and motif/exclusion contradictions.
+- Preserve the semantic profile in Skin Studio v2 packages and structured QA.
+- Add blue-sky and comic regression fixtures to prevent unrelated scene leakage.
+- Add a machine-readable cross-platform capability report.
+- Add a read-only macOS app-bundle discovery and package preflight probe; macOS skin activation remains disabled and unimplemented.
+
 ## 0.4.0 — 2026-08-10
 
 - Add an experimental, reversible Windows skin runtime for exact enabled Codex versions.

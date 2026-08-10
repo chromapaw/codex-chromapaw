@@ -17,6 +17,7 @@ Read [references/safety-model.md](references/safety-model.md) completely before 
 - **Validate:** run `scripts/validate_skin_package.py` for skins or `scripts/validate_pet_package.py` for desktop v2 pets and report every failure.
 - **Preview:** display package previews without activating the skin.
 - **Activate skin:** use the Windows Runtime Beta only after the exact-version gates and explicit acknowledgment below pass.
+- **Probe macOS:** use `scripts/macos_compat.py` only to collect read-only app metadata and package compatibility. There is no macOS activation command yet.
 - **Install or restore pet:** use `scripts/install_pet.py` or `scripts/restore_pet.py`; replacement must remain explicit and backup-backed.
 - **Stop or restore skin:** use the active runtime state. Never reconstruct session identifiers, ports, process ids, or backup paths from guesses.
 - **Remove:** delete only the selected ChromaPaw asset after confirming its resolved path remains inside the declared root.
@@ -105,4 +106,4 @@ After restore, the user may launch Codex normally without the debugging argument
 
 ## Current compatibility
 
-Version `0.4.0` enables activation only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json`. The locally discovered official AppX `26.803.5235.0` remains disabled because protected package execution rejected the required isolated runtime launch. Discovery does not imply activation support.
+Version `0.4.1` enables Windows activation only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json`. The locally discovered official AppX `26.803.5235.0` remains disabled because protected package execution rejected the required isolated runtime launch. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.

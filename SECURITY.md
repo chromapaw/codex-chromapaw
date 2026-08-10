@@ -48,11 +48,18 @@ The executable hash is a per-session continuity check, not a claim that every al
 
 Reference images and generated assets stay in declared local output paths unless a separately disclosed image-generation workflow uploads them. Runtime screenshots may contain task names, source paths, or conversation text and require an explicit CLI acknowledgment. Do not publish captures without user permission.
 
+## macOS probe boundary
+
+The 0.4.1 macOS tool is compatibility discovery only. It may read `Info.plist`, hash the bundle's declared executable, inspect packaging signals, and validate a local skin package. It does not launch the app, open a debugging port, inject CSS, edit the application bundle, modify `app.asar`, or write activation state. The registry requires `activationImplemented: false` and rejects every adapter whose `activationEnabled` is not false.
+
+Do not publish a raw compatibility report without reviewing absolute paths and local metadata. No macOS activation adapter may be enabled until a reversible design passes exact-version real-device testing and code-signing protections remain intact.
+
 ## Required invariants
 
 ChromaPaw must:
 
 - never weaken Windows package protections to activate a skin;
+- never weaken macOS code-signing, Gatekeeper, or bundle protections;
 - never expose CDP beyond loopback;
 - disclose every local port and background process;
 - refuse activation on unknown or unverified versions;

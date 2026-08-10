@@ -23,8 +23,13 @@ except ImportError as exc:  # pragma: no cover - exercised by CLI environments
 
 from skin_package import PREVIEW_DIMENSIONS, contrast_ratio
 
+try:
+    from .theme_profile import normalize_theme_profile, sha256_file
+except ImportError:
+    from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
-GENERATOR_VERSION = "0.4.0"
+
+GENERATOR_VERSION = "0.4.1"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 
@@ -413,13 +418,23 @@ def _load_request(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"request cannot be read: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schemaVersion") != 1:
-        raise ValueError("request must be a Skin Studio schemaVersion 1 object")
+    if not isinstance(data, dict) or data.get("schemaVersion") not in {1, 2}:
+        raise ValueError("request must be a Skin Studio schemaVersion 1 or 2 object")
     for field in ("id", "displayName", "description", "mode", "artworkImage", "source"):
         if field not in data:
             raise ValueError(f"request is missing {field}")
     if data["mode"] not in {"light", "dark", "adaptive"}:
         raise ValueError("request mode must be light, dark, or adaptive")
+    if data["schemaVersion"] == 2:
+        if "themeProfile" not in data or "referenceImage" not in data:
+            raise ValueError("schemaVersion 2 request requires themeProfile and referenceImage")
+        profile = normalize_theme_profile(data["themeProfile"])
+        reference = Path(str(data["referenceImage"])).expanduser().resolve()
+        if not reference.is_file():
+            raise ValueError(f"reference image does not exist: {reference}")
+        if profile["referenceSha256"] != sha256_file(reference):
+            raise ValueError("theme profile does not match the request reference image SHA-256")
+        data["themeProfile"] = profile
     return data
 
 
@@ -543,10 +558,15 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
             },
             {"id": "window-ratio-previews", "status": "pass", "value": 6, "threshold": 6},
             {"id": "pet-overlay-isolation", "status": "pass"},
+            {
+                "id": "semantic-theme-profile",
+                "status": "pass",
+                "value": "present" if request.get("themeProfile") else "legacy-request",
+            },
         ],
         "activation": {
             "status": "not-attempted",
-            "reason": "Portable package generation is separate from the 0.4 runtime.",
+            "reason": "Portable package generation is separate from runtime compatibility and activation.",
         },
     }
     qa_relative = "qa/skin-studio-report.json"
@@ -579,6 +599,8 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
         "source": request["source"],
         "qa": qa_relative,
     }
+    if request.get("themeProfile"):
+        manifest["semanticProfile"] = request["themeProfile"]
     (output / "skin.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

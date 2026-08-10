@@ -37,10 +37,15 @@ except ImportError:
         safe_relative_path,
     )
 
+try:
+    from .theme_profile import validate_theme_profile
+except ImportError:
+    from theme_profile import validate_theme_profile  # type: ignore
+
 
 ALLOWED_MODES = {"light", "dark", "adaptive"}
 V1_FIELDS = {"schemaVersion", "id", "displayName", "description", "mode", "assets", "theme", "source"}
-V2_FIELDS = V1_FIELDS | {"layout", "variants", "qa"}
+V2_FIELDS = V1_FIELDS | {"layout", "variants", "qa", "semanticProfile"}
 
 
 def _check_fields(
@@ -221,6 +226,12 @@ def _validate_v2(root: Path, data: dict[str, Any], errors: list[str]) -> None:
         "skin.json",
         errors,
     )
+
+    if "semanticProfile" in data:
+        errors.extend(
+            f"semanticProfile: {error}"
+            for error in validate_theme_profile(data.get("semanticProfile"))
+        )
 
     preview_values: dict[str, str] = {}
     stylesheet_values: dict[str, str] = {}

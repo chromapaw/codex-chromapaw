@@ -11,6 +11,11 @@ import sys
 import unicodedata
 from pathlib import Path
 
+try:
+    from .theme_profile import load_theme_profile, sha256_file
+except ImportError:
+    from theme_profile import load_theme_profile, sha256_file  # type: ignore
+
 
 SUPPORTED_IMAGES = {".png", ".webp", ".jpg", ".jpeg"}
 
@@ -45,6 +50,9 @@ def _image_path(value: Path, field: str) -> Path:
 def build_request(args: argparse.Namespace) -> dict[str, object]:
     reference = _image_path(args.image, "reference image")
     artwork = _image_path(args.artwork or args.image, "artwork image")
+    profile = load_theme_profile(args.theme_profile.expanduser().resolve())
+    if profile["referenceSha256"] != sha256_file(reference):
+        raise ValueError("theme profile does not match the reference image SHA-256")
     display_name = clean_text(args.name or reference.stem, "name", 80)
     skin_id = slugify(args.id or display_name)
     if args.id and skin_id != args.id:
@@ -57,7 +65,11 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
     )
     scene_brief = clean_text(
         args.scene_brief
-        or "Preserve the reference cues, add atmospheric depth, and keep the central reading area quiet.",
+        or (
+            f"Create the {profile['themeName']} environment in {profile['visualStyle']} style with "
+            f"a {profile['mood']} mood. Preserve these motifs: {', '.join(profile['motifs'])}. "
+            f"Avoid unrelated elements: {', '.join(profile['avoidElements']) or 'none specified'}."
+        ),
         "scene brief",
         500,
     )
@@ -70,7 +82,7 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
         source["url"] = clean_text(args.source_url, "source URL", 500)
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "id": skin_id,
         "displayName": display_name,
         "description": description,
@@ -78,6 +90,7 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
         "referenceImage": str(reference),
         "artworkImage": str(artwork),
         "sceneBrief": scene_brief,
+        "themeProfile": profile,
         "source": source,
         "target": {
             "kind": "chromapaw-portable-skin",
@@ -96,6 +109,12 @@ def main() -> int:
         "--artwork",
         type=Path,
         help="Approved expanded scene; defaults to the original reference image",
+    )
+    parser.add_argument(
+        "--theme-profile",
+        required=True,
+        type=Path,
+        help="Validated theme-profile.json derived from the same reference image",
     )
     parser.add_argument("--name", help="Display name; defaults to the reference filename")
     parser.add_argument("--id", help="Optional lower-case kebab-case package id")

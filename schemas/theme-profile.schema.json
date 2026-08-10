@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chromapaw/codex-chromapaw/schemas/theme-profile.schema.json",
+  "title": "ChromaPaw semantic theme profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "referenceSha256",
+    "sourceKind",
+    "themeName",
+    "visualStyle",
+    "mood",
+    "identityCues",
+    "motifs",
+    "avoidElements",
+    "depthPlan",
+    "safeZoneGuidance"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "referenceSha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "sourceKind": {"enum": ["full-environment", "subject", "texture", "abstract", "logo"]},
+    "themeName": {"type": "string", "minLength": 1, "maxLength": 80},
+    "visualStyle": {"type": "string", "minLength": 1, "maxLength": 120},
+    "mood": {"type": "string", "minLength": 1, "maxLength": 120},
+    "identityCues": {"$ref": "#/$defs/cueList"},
+    "motifs": {"$ref": "#/$defs/cueList"},
+    "avoidElements": {
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 120}
+    },
+    "depthPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["atmosphere", "distant", "midground", "foreground"],
+      "properties": {
+        "atmosphere": {"type": "string", "minLength": 1, "maxLength": 240},
+        "distant": {"type": "string", "minLength": 1, "maxLength": 240},
+        "midground": {"type": "string", "minLength": 1, "maxLength": 240},
+        "foreground": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    },
+    "safeZoneGuidance": {"type": "string", "minLength": 1, "maxLength": 240}
+  },
+  "$defs": {
+    "cueList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 120}
+    }
+  }
+}

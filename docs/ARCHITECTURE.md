@@ -1,6 +1,6 @@
 # Architecture
 
-ChromaPaw separates creative generation, deterministic packaging, validation, and live application integration. A UI compatibility change should affect the runtime adapter, not the portable artwork or pet atlas.
+ChromaPaw separates image understanding, creative generation, deterministic packaging, validation, and live application integration. A runtime compatibility change should not invalidate portable artwork or a pet atlas.
 
 ```mermaid
 flowchart TD
@@ -9,22 +9,24 @@ flowchart TD
     C --> D["hatch-pet v2 generation and visual QA"]
     D --> E["Validate staged pet package"]
     E --> F["Install, back up, or restore"]
-    B -->|"Skin"| G{"Full environment?"}
-    G -->|"No"| H["Generate expanded scene"]
-    G -->|"Yes"| I["Normalize skin request"]
-    H --> I
-    I --> J["Build v2 package and six previews"]
-    J --> K["Validate portable skin"]
-    K --> L{"Enabled exact Windows adapter?"}
-    L -->|"No"| M["Preview only; fail closed"]
-    L -->|"Yes"| N["Back up and launch runtime-owned Codex"]
-    N --> O["Inject, monitor, and verify"]
-    O --> P["Stop and restore"]
+    B -->|"Skin"| G["Analyze current upload and user intent"]
+    G --> H["Create SHA-bound semantic theme profile"]
+    H --> I{"Full environment?"}
+    I -->|"No"| J["Generate profile-specific scene"]
+    I -->|"Yes"| K["Use original artwork"]
+    J --> L["Normalize skin request"]
+    K --> L
+    L --> M["Build v2 package and six previews"]
+    M --> N["Validate portable skin"]
+    N --> O{"Runtime path"}
+    O -->|"Enabled exact Windows adapter"| P["Explicit activate, verify, restore"]
+    O -->|"macOS"| Q["Read-only compatibility probe"]
+    O -->|"Unsupported"| R["Preview only; fail closed"]
 ```
 
 ## Plugin layer
 
-The plugin manifest exposes pet creation, skin creation, and management skills. Codex plugins can package skills and supporting scripts, but ChromaPaw does not claim that the documented plugin surface includes a desktop skin API. The live Windows component is explicitly experimental.
+The plugin manifest exposes pet creation, skin creation, and management skills. Plugins can package skills and supporting scripts. ChromaPaw keeps desktop skin activation experimental and separate from documented package generation.
 
 ## Pet pipeline
 
@@ -36,35 +38,38 @@ The plugin manifest exposes pet creation, skin creation, and management skills. 
 
 ## Skin Studio pipeline
 
-1. The skin skill inspects the source and uses image generation when a full environment is missing.
-2. `prepare_skin_request.py` separates the original reference from approved scene artwork and normalizes identity, mode, guidance, and attribution.
-3. `build_skin_package.py` converts artwork to a bounded PNG, extracts palettes, emits fixed/adaptive CSS, renders six previews, and records QA.
-4. `validate_skin_package.py` accepts legacy v1 packages and strictly validates v2 paths, palettes, contrast, safe zones, depth layers, variant coverage, attribution, and passing QA.
+1. The skin skill inspects only the current source and user request.
+2. `prepare_theme_profile.py` records source kind, style, mood, identity cues, motifs, avoid-elements, four image-specific depth descriptions, safe-zone guidance, and the reference SHA-256.
+3. If the source is not a complete environment, image generation expands it using that profile. Examples never supply default content.
+4. `prepare_skin_request.py` verifies the reference hash, embeds the semantic profile, separates original reference from approved artwork, and normalizes mode and attribution.
+5. `build_skin_package.py` converts artwork to a bounded PNG, extracts palettes, emits fixed/adaptive CSS, renders six previews, and preserves the semantic profile in the package.
+6. `validate_skin_package.py` accepts legacy v1 packages and strictly validates v2 paths, semantics, palettes, contrast, safe zones, depth layers, variant coverage, attribution, and passing QA.
 
 The CSS contains an avatar-overlay guard because Codex may load the same stylesheet in a transparent pet window.
 
-## Windows runtime
+## Runtime layers
 
-`windows_runtime.py` owns the lifecycle and `cdp_client.py` provides a dependency-free loopback HTTP/WebSocket client.
+### Windows Runtime Beta
 
-- The adapter registry is schemaVersion 1, exact-version, and fail-closed.
-- Preflight hashes the executable, adapter file, skin manifest, and compiled CSS.
-- Activation embeds the package background as a data URI and injects CSS only into adapter-allowed `app://` targets.
-- A disclosed monitor handles delayed windows without modifying application files.
-- Verification checks process identities, registry continuity, endpoint/browser identity, CSS hash, and session ownership.
-- Restore stops the monitor, removes owned CSS, terminates the runtime-owned process tree, closes CDP, and safely reconciles a known volatile config key.
+`windows_runtime.py` owns an exact-version, fail-closed lifecycle and `cdp_client.py` provides a dependency-free loopback HTTP/WebSocket client. Preflight hashes the executable, adapter, package, and compiled CSS. Activation injects only into allowed `app://` targets, monitors delayed windows, and restores the runtime-owned process without changing application files.
 
-See [WINDOWS_RUNTIME_BETA.md](WINDOWS_RUNTIME_BETA.md) for the operational contract.
+See [WINDOWS_RUNTIME_BETA.md](WINDOWS_RUNTIME_BETA.md).
+
+### macOS compatibility probe
+
+`macos_compat.py` reads `Info.plist`, hashes the bundle's declared executable, records Electron packaging signals, and validates a selected skin package. Its registry is locked to `activationImplemented: false`, every adapter must have `activationEnabled: false`, and there is no activation command.
+
+See [MACOS_COMPATIBILITY.md](MACOS_COMPATIBILITY.md).
 
 ## Compatibility strategy
 
-Skin packages and runtime adapters have independent schemas. A Codex selector, launch model, or version change disables activation until a new exact adapter passes isolated live verification. The portable package remains valid for preview and future adapters.
+Portable packages, semantic profiles, and runtime adapters have independent schemas. A Codex selector, launch model, operating-system policy, or version change disables live activation until an exact adapter passes real-device verification. Generation and preview remain available independently.
 
 ## Non-goals
 
-- Patching signed Codex application files, `app.asar`, or `WindowsApps`.
-- Weakening AppX execution protections.
+- Patching signed Codex application files, `app.asar`, `WindowsApps`, or macOS app bundles.
+- Weakening AppX, Gatekeeper, code-signing, or platform execution protections.
 - Opening a fixed, externally reachable, or long-lived debugging port.
-- Claiming compatibility with an unknown or discovery-only version.
+- Claiming compatibility with an unknown, discovery-only, or fixture-only version.
+- Reusing beach or any other scene motif across unrelated uploads.
 - Hosting or collecting user images.
-- Providing a macOS runtime in 0.4.

@@ -36,6 +36,19 @@ Keep a candidate adapter's `activationEnabled` value false until all checks pass
 
 Never enable an AppX adapter by bypassing protected-package execution. Record a failed launch as evidence and leave activation disabled.
 
+## macOS adapter acceptance
+
+The macOS registry remains probe-only until an implementation exists. Fixture tests can validate metadata parsing but do not count as live support. Before any macOS activation field or command is introduced:
+
+1. Collect a sanitized discovery/preflight report from an actual Mac and exact official Codex build.
+2. Document bundle identity, executable, Electron layout, code-signing behavior, launch model, and all temporary state.
+3. Design a reversible path that does not patch the signed `.app` bundle or `app.asar`.
+4. Verify the main window and transparent pet overlay on the real build.
+5. Verify complete restoration and closure of any temporary process or port.
+6. Keep the new adapter disabled until exact-version tests and manual visual evidence pass.
+
+Do not infer macOS live support from portable Python code, a synthetic `.app` fixture, or successful package generation.
+
 ## Pull requests
 
 - Keep changes focused and explain user-visible behavior.

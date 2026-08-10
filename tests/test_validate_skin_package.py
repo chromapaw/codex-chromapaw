@@ -16,6 +16,8 @@ sys.path.insert(0, str(SCRIPTS))
 
 from build_skin_package import build_package  # noqa: E402
 from prepare_skin_request import build_request  # noqa: E402
+from prepare_theme_profile import build_profile as build_theme_profile  # noqa: E402
+from theme_profile import ThemeProfileError, normalize_theme_profile  # noqa: E402
 from validate_skin_package import validate_package  # noqa: E402
 
 
@@ -69,16 +71,59 @@ def make_v1_package(root: Path) -> None:
     (root / "skin.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def make_theme_profile(root: Path, image: Path, kind: str = "sky") -> tuple[dict, Path]:
+    cases = {
+        "sky": {
+            "theme_name": "Open Blue Sky",
+            "visual_style": "soft dimensional illustration",
+            "mood": "fresh, airy, and optimistic",
+            "identity_cue": ["clear blue gradient", "rounded white cloud shapes"],
+            "motif": ["blue sky", "white clouds", "soft sunlight"],
+            "avoid_element": ["ocean", "sand", "coral"],
+            "atmosphere": "A luminous blue sky with gentle high-altitude haze.",
+            "distant": "Small layered cloud banks and a faint bright horizon.",
+            "midground": "Large soft clouds framing the quiet reading surface.",
+            "foreground": "A few restrained cloud wisps at the outer corners.",
+        },
+        "comic": {
+            "theme_name": "Graphic Comic Panels",
+            "visual_style": "bold cel-shaded comic illustration",
+            "mood": "energetic, playful, and crisp",
+            "identity_cue": ["heavy ink outlines", "limited saturated colors"],
+            "motif": ["halftone dots", "panel borders", "speed lines"],
+            "avoid_element": ["photorealism", "ocean waves", "coral"],
+            "atmosphere": "A flat graphic color field with subtle halftone texture.",
+            "distant": "Oversized abstract comic panels behind the content area.",
+            "midground": "Bold panel borders and readable cel-shaded shapes.",
+            "foreground": "Restrained speed lines and ink accents near outer edges.",
+        },
+    }
+    case = cases[kind]
+    profile = build_theme_profile(
+        Namespace(
+            image=image,
+            source_kind="full-environment",
+            safe_zone_guidance="Keep the center and bottom input region calm and low detail.",
+            **case,
+        )
+    )
+    path = root / f"theme-profile-{kind}.json"
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    return profile, path
+
+
 def make_v2_package(root: Path) -> Path:
-    image = root / "beach.png"
+    image = root / "sky.png"
     write_rgba_png(image, 96, 64)
+    _, profile_path = make_theme_profile(root, image)
     request = build_request(
         Namespace(
             image=image,
             artwork=None,
-            name="Fresh Beach",
-            id="fresh-beach",
-            description="A fresh layered beach workspace.",
+            theme_profile=profile_path,
+            name="Open Blue Sky",
+            id="open-blue-sky",
+            description="A fresh layered blue-sky workspace.",
             mode="adaptive",
             scene_brief=None,
             author="Test artist",
@@ -119,9 +164,84 @@ class SkinPackageValidationTests(unittest.TestCase):
             self.assertEqual(manifest["schemaVersion"], 2)
             self.assertEqual(len(manifest["variants"]), 6)
             self.assertEqual(len(manifest["assets"]["previews"]), 6)
+            self.assertEqual(manifest["semanticProfile"]["themeName"], "Open Blue Sky")
+            self.assertIn("white clouds", manifest["semanticProfile"]["motifs"])
             css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
             self.assertIn('data-avatar-overlay-content-frame="true"', css)
             self.assertIn('background-image: url("./background.png")', css)
+
+    def test_non_beach_theme_profiles_remain_semantically_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for kind, expected, forbidden in (
+                ("sky", "white clouds", "coral"),
+                ("comic", "halftone dots", "ocean waves"),
+            ):
+                case_root = root / kind
+                case_root.mkdir()
+                image = case_root / f"{kind}.png"
+                write_rgba_png(image, 96, 64)
+                profile, profile_path = make_theme_profile(case_root, image, kind)
+                request = build_request(
+                    Namespace(
+                        image=image,
+                        artwork=None,
+                        theme_profile=profile_path,
+                        name=profile["themeName"],
+                        id=None,
+                        description=None,
+                        mode="adaptive",
+                        scene_brief=None,
+                        author="Test artist",
+                        license="CC0-1.0",
+                        source_url=None,
+                    )
+                )
+                request_path = case_root / "skin-request.json"
+                request_path.write_text(json.dumps(request), encoding="utf-8")
+                package = case_root / "package"
+                build_package(request_path, package)
+                manifest = json.loads((package / "skin.json").read_text(encoding="utf-8"))
+                semantic = manifest["semanticProfile"]
+                self.assertIn(expected, semantic["motifs"])
+                self.assertNotIn(forbidden, semantic["motifs"])
+                self.assertEqual(validate_package(package), [])
+
+    def test_theme_profile_rejects_motif_avoid_contradiction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "sky.png"
+            write_rgba_png(image, 32, 32)
+            profile, _ = make_theme_profile(root, image)
+            profile["avoidElements"].append("white clouds")
+            with self.assertRaises(ThemeProfileError):
+                normalize_theme_profile(profile)
+
+    def test_skin_request_rejects_profile_for_different_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.png"
+            second = root / "second.png"
+            write_rgba_png(first, 32, 32)
+            write_rgba_png(second, 33, 32)
+            _, profile_path = make_theme_profile(root, first)
+            with self.assertRaises(ValueError) as context:
+                build_request(
+                    Namespace(
+                        image=second,
+                        artwork=None,
+                        theme_profile=profile_path,
+                        name=None,
+                        id=None,
+                        description=None,
+                        mode="adaptive",
+                        scene_brief=None,
+                        author="Test artist",
+                        license="CC0-1.0",
+                        source_url=None,
+                    )
+                )
+            self.assertIn("does not match", str(context.exception))
 
     def test_path_escape_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

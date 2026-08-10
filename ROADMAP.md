@@ -39,6 +39,14 @@
 - Safe reconciliation of a known volatile Codex config key.
 - Unit fixtures and isolated live verification; unsupported versions fail closed.
 
+## 0.4.1 — Semantic profiles and macOS probe ✅
+
+- Bind every skin theme profile to the current upload's SHA-256.
+- Derive scene motifs and exclusions dynamically from the upload and user request.
+- Add non-beach semantic regression fixtures.
+- Report generation, pet-dependency, and activation readiness separately.
+- Discover macOS app bundles and collect read-only preflight evidence without implementing activation.
+
 ## 0.4.x — Runtime hardening
 
 - Add adapters only after exact-version isolated live verification.
@@ -48,7 +56,8 @@
 
 ## 0.5 — Cross-platform and ecosystem
 
-- macOS runtime investigation.
+- Real-Mac validation for skin generation and pet install/restore.
+- Reversible exact-version macOS skin runtime investigation and implementation.
 - Community skin and pet gallery format.
 - Signed releases and reproducible packaging.
 - Accessibility and localization passes.

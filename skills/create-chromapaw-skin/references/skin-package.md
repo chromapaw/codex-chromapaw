@@ -2,24 +2,25 @@
 
 Use this contract for ChromaPaw Skin Studio v2 portable skins. The dependency-free validator still accepts legacy schemaVersion 1 packages.
 
-## 1. Keep three locations separate
+## 1. Keep four locations separate
 
-- reference/run directory: original image, optional generated environment, and `skin-request.json`
+- reference/run directory: original image, semantic profile, optional generated environment, and `skin-request.json`
 - package directory: shareable v2 assets, metadata, previews, and QA
+- pet directory: managed separately through `CODEX_HOME`
 - runtime state directory: used only by a separately authorized, supported runtime; Codex application files remain untouched
 
 Skin Studio never generates directly into Codex application files.
 
-## 2. Prepare the scene
+## 2. Prepare the semantic profile and scene
 
-A complete skin needs four visible depth layers:
+First follow [theme-profile.md](theme-profile.md) and create `theme-profile.json` from the current image and user request. A complete skin needs four visible depth layers, but these are spatial slots rather than fixed subject matter:
 
-1. atmosphere — sky, haze, light, clouds, particles, or distant color
-2. distant — horizon, skyline, far landscape, or room boundary
+1. atmosphere — the farthest visual field appropriate to this image
+2. distant — remote image-specific shapes or structures
 3. midground — the main environment around the reading surface
-4. foreground — restrained edge decoration that adds depth without covering controls
+4. foreground — restrained image-specific edge decoration that adds depth without covering controls
 
-If the uploaded image is only a mascot, object, texture, or palette cue, first use the image-generation workflow to create a full desktop environment. Keep the central reading and bottom input zones low-detail.
+If the uploaded image is only a mascot, object, texture, abstract cue, or logo, use the image-generation workflow to create a full desktop environment from its semantic profile. Keep the central reading and bottom input zones low-detail. Do not introduce an unrelated scene category.
 
 ## 3. Normalize the request
 
@@ -29,15 +30,15 @@ Use the workspace Python returned by Codex's workspace dependency loader. The bu
 python scripts/prepare_skin_request.py \
   --image <absolute-original-reference> \
   --artwork <absolute-approved-expanded-scene> \
-  --name "Summer Beach" \
+  --theme-profile <absolute-run-directory>/theme-profile.json \
+  --name "Open Blue Sky" \
   --mode adaptive \
-  --scene-brief "Fresh beach, waves, sand, coral, and dimensional foreground edges" \
   --author "User-provided reference" \
   --license "Unspecified" \
   --output-dir <absolute-run-directory>
 ```
 
-Omit `--artwork` when the original is already a complete environment. Read the generated request before building.
+Omit `--artwork` when the original is already a complete environment. Read the generated request and confirm that its embedded `themeProfile` still matches the current upload before building.
 
 ## 4. Build and validate
 
@@ -72,7 +73,7 @@ my-skin/
     └── skin-studio-report.json
 ```
 
-`skin.json` declares schemaVersion 2, the active mode, all three stylesheets, all six previews, accessible light/dark palettes, a normalized safe content zone, four depth layers, source attribution, and the QA report path.
+`skin.json` declares schemaVersion 2, the active mode, all three stylesheets, all six previews, accessible light/dark palettes, the source-bound semantic profile, a normalized safe content zone, four depth layers, source attribution, and the QA report path.
 
 The preview dimensions are fixed for deterministic QA:
 
@@ -87,10 +88,11 @@ Inspect both light and dark 16:10 previews, then check the narrow-height 16:9 an
 - the result looks like a flat color swap;
 - the environment disappears behind opaque panels;
 - important artwork sits under the reading or input area;
+- unrelated or forbidden motifs appear;
 - either palette fails 4.5:1 text contrast;
 - pet overlay isolation is absent from the CSS;
 - any QA check or structural validation fails.
 
 ## 6. Activation boundary
 
-The stylesheets are portable package content, not permission to inject into Codex. Finish and validate the package first. If the user separately requests activation, hand off to `$manage-chromapaw`, which must run the 0.4 Windows Runtime Beta preflight and safety workflow. Unknown or disabled versions remain preview-only.
+The stylesheets are portable package content, not permission to inject into Codex. Finish and validate the package first. If the user separately requests activation, hand off to `$manage-chromapaw`. Windows uses its exact-version Runtime Beta workflow. macOS currently provides only a read-only compatibility probe; it does not activate a skin.

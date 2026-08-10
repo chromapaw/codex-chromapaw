@@ -12,7 +12,7 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"], "0.4.0")
+        self.assertEqual(manifest["version"], "0.4.1")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -54,11 +54,15 @@ class PluginStructureTests(unittest.TestCase):
     def test_skin_studio_assets_exist(self) -> None:
         expected = (
             "schemas/skin.schema.json",
+            "schemas/theme-profile.schema.json",
             "scripts/skin_package.py",
+            "scripts/theme_profile.py",
+            "scripts/prepare_theme_profile.py",
             "scripts/prepare_skin_request.py",
             "scripts/build_skin_package.py",
             "scripts/validate_skin_package.py",
             "skills/create-chromapaw-skin/references/skin-package.md",
+            "skills/create-chromapaw-skin/references/theme-profile.md",
             "docs/SKIN_STUDIO_MVP.md",
             "requirements-skin.txt",
         )
@@ -73,6 +77,19 @@ class PluginStructureTests(unittest.TestCase):
             "scripts/windows_runtime.py",
             "tests/test_windows_runtime.py",
             "docs/WINDOWS_RUNTIME_BETA.md",
+        )
+        for relative in expected:
+            self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_cross_platform_probe_assets_exist(self) -> None:
+        expected = (
+            "runtime/macos-adapters.json",
+            "schemas/macos-runtime-adapters.schema.json",
+            "scripts/macos_compat.py",
+            "scripts/platform_capabilities.py",
+            "tests/test_macos_compat.py",
+            "tests/test_platform_capabilities.py",
+            "docs/MACOS_COMPATIBILITY.md",
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
