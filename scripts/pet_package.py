@@ -8,7 +8,7 @@ import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 
 PET_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -77,52 +77,84 @@ def _uint24_le(data: bytes) -> int:
     return data[0] | (data[1] << 8) | (data[2] << 16)
 
 
-def _webp_dimensions(data: bytes) -> tuple[int, int]:
-    if len(data) < 20 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+def _webp_dimensions(stream: BinaryIO) -> tuple[int, int]:
+    stream.seek(0, 2)
+    file_size = stream.tell()
+    stream.seek(0)
+    header = stream.read(12)
+    if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WEBP":
         raise PetPackageError("spritesheet is not a valid WebP container")
 
+    riff_size = struct.unpack("<I", header[4:8])[0]
+    container_end = 8 + riff_size
+    if container_end < 12:
+        raise PetPackageError("spritesheet is not a valid WebP container")
+    if container_end > file_size:
+        raise PetPackageError("spritesheet contains a truncated WebP container")
+
     offset = 12
-    while offset + 8 <= len(data):
-        chunk_type = data[offset : offset + 4]
-        chunk_size = struct.unpack("<I", data[offset + 4 : offset + 8])[0]
+    dimensions: tuple[int, int] | None = None
+    while offset < container_end:
+        if container_end - offset < 8:
+            raise PetPackageError("spritesheet contains a truncated WebP chunk header")
+        stream.seek(offset)
+        chunk_header = stream.read(8)
+        if len(chunk_header) < 8:
+            raise PetPackageError("spritesheet contains a truncated WebP chunk header")
+
+        chunk_type = chunk_header[:4]
+        chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
         payload_start = offset + 8
         payload_end = payload_start + chunk_size
-        if payload_end > len(data):
+        padded_end = payload_end + (chunk_size % 2)
+        if payload_end > container_end or padded_end > container_end:
             raise PetPackageError("spritesheet contains a truncated WebP chunk")
-        payload = data[payload_start:payload_end]
 
         if chunk_type == b"VP8X":
+            if chunk_size < 10:
+                raise PetPackageError("spritesheet contains a truncated VP8X header")
+            payload = stream.read(10)
             if len(payload) < 10:
                 raise PetPackageError("spritesheet contains a truncated VP8X header")
-            return _uint24_le(payload[4:7]) + 1, _uint24_le(payload[7:10]) + 1
-        if chunk_type == b"VP8L":
+            dimensions = (
+                _uint24_le(payload[4:7]) + 1,
+                _uint24_le(payload[7:10]) + 1,
+            )
+        elif chunk_type == b"VP8L":
+            if chunk_size < 5:
+                raise PetPackageError("spritesheet contains an invalid VP8L header")
+            payload = stream.read(5)
             if len(payload) < 5 or payload[0] != 0x2F:
                 raise PetPackageError("spritesheet contains an invalid VP8L header")
             bits = struct.unpack("<I", payload[1:5])[0]
-            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
-        if chunk_type == b"VP8 ":
+            dimensions = (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        elif chunk_type == b"VP8 ":
+            if chunk_size < 10:
+                raise PetPackageError("spritesheet contains an invalid VP8 frame header")
+            payload = stream.read(10)
             if len(payload) < 10 or payload[3:6] != b"\x9d\x01\x2a":
                 raise PetPackageError("spritesheet contains an invalid VP8 frame header")
             width = struct.unpack("<H", payload[6:8])[0] & 0x3FFF
             height = struct.unpack("<H", payload[8:10])[0] & 0x3FFF
-            return width, height
+            dimensions = width, height
 
-        offset = payload_end + (chunk_size % 2)
+        offset = padded_end
 
-    raise PetPackageError("spritesheet WebP dimensions could not be found")
+    if dimensions is None:
+        raise PetPackageError("spritesheet WebP dimensions could not be found")
+    return dimensions
 
 
 def image_dimensions(path: Path) -> tuple[int, int]:
     """Read PNG or WebP dimensions without decoding the full image."""
     try:
         with path.open("rb") as stream:
-            data = stream.read(1024 * 1024)
+            if path.suffix.lower() == ".png":
+                return _png_dimensions(stream.read(24))
+            if path.suffix.lower() == ".webp":
+                return _webp_dimensions(stream)
     except OSError as exc:
         raise PetPackageError(f"spritesheet cannot be read: {exc}") from exc
-    if path.suffix.lower() == ".png":
-        return _png_dimensions(data)
-    if path.suffix.lower() == ".webp":
-        return _webp_dimensions(data)
     raise PetPackageError("spritesheet must be PNG or WebP")
 
 

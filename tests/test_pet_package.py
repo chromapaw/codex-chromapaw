@@ -51,6 +51,17 @@ def write_vp8x_webp(path: Path, width: int, height: int) -> None:
     path.write_bytes(b"RIFF" + struct.pack("<I", riff_size) + b"WEBP" + chunk)
 
 
+def write_vp8l_webp(
+    path: Path, width: int, height: int, filler_size: int = 1024 * 1024
+) -> None:
+    dimensions = (width - 1) | ((height - 1) << 14)
+    payload = b"\x2f" + struct.pack("<I", dimensions) + (b"\x00" * filler_size)
+    padding = b"\x00" if len(payload) % 2 else b""
+    chunk = b"VP8L" + struct.pack("<I", len(payload)) + payload + padding
+    riff_size = 4 + len(chunk)
+    path.write_bytes(b"RIFF" + struct.pack("<I", riff_size) + b"WEBP" + chunk)
+
+
 def make_package(
     root: Path,
     *,
@@ -100,6 +111,41 @@ class PetPackageTests(unittest.TestCase):
             errors, package = validate_pet_package(package_dir)
             self.assertEqual(errors, [])
             self.assertIsNotNone(package)
+
+    def test_large_vp8l_webp_dimensions_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            package_dir = make_package(Path(temporary) / "package")
+            (package_dir / "spritesheet.png").unlink()
+            spritesheet = package_dir / "spritesheet.webp"
+            write_vp8l_webp(spritesheet, 1536, 2288)
+            self.assertGreater(spritesheet.stat().st_size, 1024 * 1024)
+            manifest_path = package_dir / "pet.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["spritesheetPath"] = "spritesheet.webp"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            errors, package = validate_pet_package(package_dir)
+
+            self.assertEqual(errors, [])
+            self.assertIsNotNone(package)
+            self.assertEqual((package.width, package.height), (1536, 2288))
+
+    def test_truncated_large_webp_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            package_dir = make_package(Path(temporary) / "package")
+            (package_dir / "spritesheet.png").unlink()
+            spritesheet = package_dir / "spritesheet.webp"
+            write_vp8l_webp(spritesheet, 1536, 2288)
+            spritesheet.write_bytes(spritesheet.read_bytes()[:-1])
+            manifest_path = package_dir / "pet.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["spritesheetPath"] = "spritesheet.webp"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            errors, package = validate_pet_package(package_dir)
+
+            self.assertIsNone(package)
+            self.assertTrue(any("truncated WebP" in error for error in errors))
 
     def test_path_escape_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
