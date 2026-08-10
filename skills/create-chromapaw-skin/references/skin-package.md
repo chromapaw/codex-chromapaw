@@ -1,38 +1,96 @@
-# Skin package contract
+# Skin Studio v2 workflow
 
-A portable ChromaPaw skin is a directory with this minimum structure:
+Use this contract for ChromaPaw `0.3.x` portable skins. The dependency-free validator still accepts legacy schemaVersion 1 packages.
+
+## 1. Keep three locations separate
+
+- reference/run directory: original image, optional generated environment, and `skin-request.json`
+- package directory: shareable v2 assets, metadata, previews, and QA
+- live Codex directory: untouched until a separately supported runtime is available
+
+Skin Studio never generates directly into Codex application files.
+
+## 2. Prepare the scene
+
+A complete skin needs four visible depth layers:
+
+1. atmosphere — sky, haze, light, clouds, particles, or distant color
+2. distant — horizon, skyline, far landscape, or room boundary
+3. midground — the main environment around the reading surface
+4. foreground — restrained edge decoration that adds depth without covering controls
+
+If the uploaded image is only a mascot, object, texture, or palette cue, first use the image-generation workflow to create a full desktop environment. Keep the central reading and bottom input zones low-detail.
+
+## 3. Normalize the request
+
+Use the workspace Python returned by Codex's workspace dependency loader. The builder requires Pillow from that runtime.
+
+```text
+python scripts/prepare_skin_request.py \
+  --image <absolute-original-reference> \
+  --artwork <absolute-approved-expanded-scene> \
+  --name "Summer Beach" \
+  --mode adaptive \
+  --scene-brief "Fresh beach, waves, sand, coral, and dimensional foreground edges" \
+  --author "User-provided reference" \
+  --license "Unspecified" \
+  --output-dir <absolute-run-directory>
+```
+
+Omit `--artwork` when the original is already a complete environment. Read the generated request before building.
+
+## 4. Build and validate
+
+```text
+python scripts/build_skin_package.py \
+  --request <absolute-run-directory>/skin-request.json \
+  --output-dir <absolute-package-directory> \
+  --json
+
+python scripts/validate_skin_package.py <absolute-package-directory> --json
+```
+
+The v2 package structure is:
 
 ```text
 my-skin/
 ├── skin.json
-└── assets/
-    ├── background.png
-    ├── theme.css
-    └── preview.png
+├── assets/
+│   ├── background.png
+│   ├── theme.css
+│   ├── theme-light.css
+│   ├── theme-dark.css
+│   ├── preview.png
+│   └── previews/
+│       ├── preview-light-16x10.png
+│       ├── preview-light-16x9.png
+│       ├── preview-light-4x3.png
+│       ├── preview-dark-16x10.png
+│       ├── preview-dark-16x9.png
+│       └── preview-dark-4x3.png
+└── qa/
+    └── skin-studio-report.json
 ```
 
-`skin.json` must declare schema version 1, a lower-case kebab-case id, display name, mode, asset paths, and the three core colors.
+`skin.json` declares schemaVersion 2, the active mode, all three stylesheets, all six previews, accessible light/dark palettes, a normalized safe content zone, four depth layers, source attribution, and the QA report path.
 
-```json
-{
-  "schemaVersion": 1,
-  "id": "summer-beach",
-  "displayName": "Summer Beach",
-  "mode": "light",
-  "assets": {
-    "background": "assets/background.png",
-    "stylesheet": "assets/theme.css",
-    "preview": "assets/preview.png"
-  },
-  "theme": {
-    "surface": "#F7FCF9",
-    "ink": "#173F46",
-    "accent": "#FF7F66",
-    "panelOpacity": 0.82
-  }
-}
-```
+The preview dimensions are fixed for deterministic QA:
 
-All paths must be relative, remain inside the package, and point to existing files. The repository root contains the authoritative JSON schema and dependency-free validator.
+- 16:10 — 960×600
+- 16:9 — 960×540
+- 4:3 — 840×630
 
-The stylesheet is package content, not permission to inject itself into Codex. A separate version-gated runtime owns activation and recovery.
+## 5. Review
+
+Inspect both light and dark 16:10 previews, then check the narrow-height 16:9 and compact 4:3 previews. Reject the package when:
+
+- the result looks like a flat color swap;
+- the environment disappears behind opaque panels;
+- important artwork sits under the reading or input area;
+- either palette fails 4.5:1 text contrast;
+- pet overlay isolation is absent from the CSS;
+- any QA check or structural validation fails.
+
+## 6. Activation boundary
+
+The stylesheets are portable package content, not permission to inject into Codex. ChromaPaw 0.3 creates and validates skins but does not activate them. A future version-gated runtime must own backup, activation, verification, stop, and restore.

@@ -2,66 +2,206 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/chromapaw/codex-chromapaw/schemas/skin.schema.json",
   "title": "ChromaPaw skin package",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schemaVersion",
-    "id",
-    "displayName",
-    "mode",
-    "assets",
-    "theme"
-  ],
-  "properties": {
-    "schemaVersion": {
-      "const": 1
-    },
+  "$defs": {
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
       "maxLength": 64
     },
-    "displayName": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 80
-    },
-    "description": {
-      "type": "string",
-      "maxLength": 240
-    },
     "mode": {
       "enum": ["light", "dark", "adaptive"]
     },
-    "assets": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["background", "stylesheet", "preview"],
-      "properties": {
-        "background": {"type": "string", "pattern": "^[^/\\\\].+\\.(png|webp|jpg|jpeg)$"},
-        "stylesheet": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"},
-        "preview": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"}
-      }
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
     },
-    "theme": {
+    "palette": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["surface", "ink", "accent"],
+      "required": ["surface", "ink", "accent", "panelOpacity"],
       "properties": {
-        "surface": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
-        "ink": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
-        "accent": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "surface": {"$ref": "#/$defs/color"},
+        "ink": {"$ref": "#/$defs/color"},
+        "accent": {"$ref": "#/$defs/color"},
         "panelOpacity": {"type": "number", "minimum": 0.35, "maximum": 1.0}
       }
     },
-    "source": {
+    "sourceV1": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "author": {"type": "string", "maxLength": 100},
-        "license": {"type": "string", "maxLength": 80},
+        "author": {"type": "string", "minLength": 1, "maxLength": 100},
+        "license": {"type": "string", "minLength": 1, "maxLength": 80},
         "url": {"type": "string", "format": "uri"}
       }
+    },
+    "sourceV2": {
+      "allOf": [
+        {"$ref": "#/$defs/sourceV1"},
+        {"required": ["author", "license"]}
+      ]
     }
-  }
+  },
+  "oneOf": [
+    {
+      "title": "Legacy skin package v1",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "id", "displayName", "mode", "assets", "theme"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "id": {"$ref": "#/$defs/id"},
+        "displayName": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "minLength": 1, "maxLength": 240},
+        "mode": {"$ref": "#/$defs/mode"},
+        "assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["background", "stylesheet", "preview"],
+          "properties": {
+            "background": {"type": "string", "pattern": "^[^/\\\\].+\\.(png|webp|jpg|jpeg)$"},
+            "stylesheet": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"},
+            "preview": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"}
+          }
+        },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["surface", "ink", "accent"],
+          "properties": {
+            "surface": {"$ref": "#/$defs/color"},
+            "ink": {"$ref": "#/$defs/color"},
+            "accent": {"$ref": "#/$defs/color"},
+            "panelOpacity": {"type": "number", "minimum": 0.35, "maximum": 1.0}
+          }
+        },
+        "source": {"$ref": "#/$defs/sourceV1"}
+      }
+    },
+    {
+      "title": "Skin Studio package v2",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "id",
+        "displayName",
+        "description",
+        "mode",
+        "assets",
+        "theme",
+        "layout",
+        "variants",
+        "source",
+        "qa"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "id": {"$ref": "#/$defs/id"},
+        "displayName": {"type": "string", "minLength": 1, "maxLength": 80},
+        "description": {"type": "string", "minLength": 1, "maxLength": 240},
+        "mode": {"$ref": "#/$defs/mode"},
+        "assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["background", "stylesheet", "preview", "stylesheets", "previews"],
+          "properties": {
+            "background": {"type": "string", "pattern": "^[^/\\\\].+\\.(png|webp|jpg|jpeg)$"},
+            "stylesheet": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"},
+            "preview": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+            "stylesheets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["light", "dark", "adaptive"],
+              "properties": {
+                "light": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"},
+                "dark": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"},
+                "adaptive": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"}
+              }
+            },
+            "previews": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "light-16x10",
+                "light-16x9",
+                "light-4x3",
+                "dark-16x10",
+                "dark-16x9",
+                "dark-4x3"
+              ],
+              "properties": {
+                "light-16x10": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+                "light-16x9": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+                "light-4x3": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+                "dark-16x10": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+                "dark-16x9": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+                "dark-4x3": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"}
+              }
+            }
+          }
+        },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["surface", "ink", "accent", "panelOpacity", "palettes"],
+          "properties": {
+            "surface": {"$ref": "#/$defs/color"},
+            "ink": {"$ref": "#/$defs/color"},
+            "accent": {"$ref": "#/$defs/color"},
+            "panelOpacity": {"type": "number", "minimum": 0.35, "maximum": 1.0},
+            "palettes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["light", "dark"],
+              "properties": {
+                "light": {"$ref": "#/$defs/palette"},
+                "dark": {"$ref": "#/$defs/palette"}
+              }
+            }
+          }
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["safeContentZone", "depthLayers"],
+          "properties": {
+            "safeContentZone": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y", "width", "height"],
+              "properties": {
+                "x": {"type": "number", "minimum": 0, "maximum": 1},
+                "y": {"type": "number", "minimum": 0, "maximum": 1},
+                "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+              }
+            },
+            "depthLayers": {
+              "const": ["atmosphere", "distant", "midground", "foreground"]
+            }
+          }
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "mode", "aspectRatio", "preview", "stylesheet"],
+            "properties": {
+              "id": {"$ref": "#/$defs/id"},
+              "mode": {"enum": ["light", "dark"]},
+              "aspectRatio": {"enum": ["16:10", "16:9", "4:3"]},
+              "preview": {"type": "string", "pattern": "^[^/\\\\].+\\.png$"},
+              "stylesheet": {"type": "string", "pattern": "^[^/\\\\].+\\.css$"}
+            }
+          }
+        },
+        "source": {"$ref": "#/$defs/sourceV2"},
+        "qa": {"type": "string", "pattern": "^[^/\\\\].+\\.json$"}
+      }
+    }
+  ]
 }

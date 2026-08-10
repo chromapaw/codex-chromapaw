@@ -2,73 +2,64 @@
 
 Turn one image into a custom Codex skin or animated pet.
 
-> Version 0.2.1 ships an installable desktop Pet Beta. Visual generation and QA use a compatible installed `hatch-pet` workflow; rich background skins remain portable packages until a reversible runtime is available.
+> Version 0.3.0 ships the one-image Skin Studio MVP and the installable desktop Pet Beta. Skin packages can be generated and fully validated now; live skin activation remains separate until a reversible Codex runtime is available.
 
-[中文说明](#中文说明) · [Pet MVP](docs/PET_MVP.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
+[中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
 ## Vision
 
-ChromaPaw aims to make Codex customization approachable to everyone:
-
 1. Upload one reference image in Codex.
 2. Choose **Pet** or **Skin**.
-3. Preview the generated result.
-4. Validate it before installation.
+3. Preview and review the generated result.
+4. Validate it before installation or activation.
 5. Switch or restore safely.
 
 ## Capabilities
 
+### Skin Studio MVP
+
+- Turn a full environment image directly into a skin, or expand a character/object reference into complete environmental artwork first.
+- Extract accessible light and dark palettes automatically.
+- Generate light, dark, and adaptive CSS with readable glass surfaces.
+- Render six visual-QA previews: light/dark × 16:10/16:9/4:3.
+- Record a normalized safe content zone, atmosphere/distant/midground/foreground depth layers, source attribution, and structured QA.
+- Isolate Codex's transparent avatar overlay so a theme background cannot appear as a rectangle behind a pet.
+- Export a portable schemaVersion 2 package without modifying a live Codex installation.
+
 ### Animated pets
 
 - Preserve the subject's recognizable silhouette, palette, face, clothing, and props.
-- Generate task-aware animation states such as working, waiting, ready, and failed.
-- Build and validate a Codex-compatible desktop v2 pet package.
+- Generate task-aware animation intent such as working, waiting, ready, and failed.
+- Build and validate a Codex-compatible desktop v2 pet package through a compatible installed `hatch-pet` workflow.
 - Produce contact sheets and motion previews before installation.
 - Refuse silent replacement, back up an existing matching id, and restore managed backups.
 
-### Layered skins
-
-- Expand a single image into a complete visual environment instead of applying a flat color.
-- Generate background, atmosphere, foreground decorations, safe content zones, and readable glass surfaces.
-- Export a portable skin package with metadata, CSS, preview, and source attribution.
-- Keep activation separate from generation so unsupported Codex versions fail safely.
-
 ## Current status
-
-Version `0.2.1` adds a Git-backed Codex marketplace, dependency preflight, isolated install smoke testing, large WebP support, and the one-image desktop Pet MVP. A production skin runtime is intentionally not included yet.
 
 | Area | Status |
 | --- | --- |
-| Plugin manifest and skill routing | Available |
-| Git marketplace install and update | Available |
-| One-image desktop Pet MVP | Available |
+| Plugin manifest and Git marketplace | Available |
+| One-image Skin Studio v2 package | Available |
+| Automatic palette, CSS, six previews, and QA | Available |
+| Legacy skin v1 validation | Compatible |
+| One-image desktop Pet Beta | Available |
 | Pet package validation/install/restore | Available |
-| Skin package generation contract | Initial workflow |
-| Skin package validator | Available |
-| Live Codex skin activation | Planned |
-| Windows runtime | Planned |
+| Live Codex skin activation | Planned for 0.4 |
+| Reversible Windows runtime | Planned for 0.4 |
 | macOS runtime | Planned |
 
 ## Install
 
 ChromaPaw requires a Codex build with plugin marketplace commands and Git available on `PATH`.
 
-Add the GitHub marketplace and install the plugin:
-
 ```bash
 codex plugin marketplace add chromapaw/codex-chromapaw --ref main
 codex plugin add codex-chromapaw@chromapaw
 ```
 
-Restart Codex and open a new task so the three ChromaPaw skills are discovered. Attach an image and invoke `$create-chromapaw-pet` or `$create-chromapaw-skin`.
+Restart Codex and open a new task so the three ChromaPaw skills are discovered. Attach an image and invoke `$create-chromapaw-skin` or `$create-chromapaw-pet`.
 
-Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw checks this dependency before generation and stops with the searched paths and remediation message when it is unavailable. From a repository checkout, inspect the dependency state with:
-
-```bash
-python scripts/check_dependencies.py --json
-```
-
-An advanced local `hatch-pet` checkout can be selected with `CHROMAPAW_HATCH_PET_DIR` or `--hatch-pet-dir`. ChromaPaw does not silently download or vendor that external workflow.
+Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw checks this dependency before generation and does not silently download or vendor it.
 
 ### Update
 
@@ -88,13 +79,33 @@ codex plugin marketplace remove chromapaw
 
 ## Plugin skills
 
-- `$create-chromapaw-pet` — create and validate an animated Codex pet from an image.
-- `$create-chromapaw-skin` — create a layered, portable skin package from an image.
-- `$manage-chromapaw` — inspect packages and use safe preview, activation, or recovery paths.
+- `$create-chromapaw-skin` — create and validate a layered Skin Studio v2 package from one image.
+- `$create-chromapaw-pet` — create, review, validate, and optionally install an animated Codex pet.
+- `$manage-chromapaw` — inspect packages and use supported preview, activation, or recovery paths.
+
+## Skin quick start
+
+In Codex, attach one image and ask:
+
+```text
+Use $create-chromapaw-skin to turn this into a fresh summer beach theme.
+Keep the beach, waves, sand, and coral visible around readable glass panels,
+and generate both light and dark previews.
+```
+
+The skill inspects the reference, creates expanded environmental artwork when necessary, builds the package, and reviews all six variants. It will not claim that the skin is active.
+
+From a repository checkout, build from existing full-scene artwork with the Codex workspace Python runtime:
+
+```bash
+python scripts/prepare_skin_request.py --image scene.png --mode adaptive --output-dir run
+python scripts/build_skin_package.py --request run/skin-request.json --output-dir package --json
+python scripts/validate_skin_package.py package --json
+```
+
+The builder requires Pillow, available in Codex's workspace runtime or installable from `requirements-skin.txt`. See [docs/SKIN_STUDIO_MVP.md](docs/SKIN_STUDIO_MVP.md) for the v2 output contract and review gates.
 
 ## Pet quick start
-
-In Codex, attach one character image and ask:
 
 ```text
 Use $create-chromapaw-pet to make this my Codex pet. While a task is running,
@@ -102,7 +113,7 @@ have it dribble and shoot a basketball. When the task finishes, have it dance
 with the basketball.
 ```
 
-The skill prepares the request, delegates the complete 8×11 animation workflow to `hatch-pet`, presents QA media, stages the package, and installs only after validation. Exact runtime state timing remains controlled by Codex; the requested actions are mapped onto the closest supported animation rows.
+The skill prepares the request, delegates complete 8×11 generation and visual QA to `hatch-pet`, stages the package, and installs only after validation. Runtime timing remains controlled by Codex; requested behavior is mapped onto the closest supported animation rows.
 
 For an already generated package:
 
@@ -117,8 +128,6 @@ Replacing an existing id is explicit and creates a backup:
 python scripts/install_pet.py path/to/pet-package --replace --json
 python scripts/restore_pet.py backup-directory-name --replace --json
 ```
-
-See [docs/PET_MVP.md](docs/PET_MVP.md) for the package contract and limitations.
 
 ## Repository layout
 
@@ -135,25 +144,20 @@ docs/                   Architecture and design notes
 ## Safety principles
 
 - Never modify `WindowsApps` or the official Codex application archive.
-- Back up user configuration before any activation or restore operation.
-- Keep rich-skin activation reversible and version-gated.
-- Do not silently upload user images or retain generated assets outside declared output locations.
+- Back up user configuration before any future activation or restore operation.
+- Keep skin generation separate from live activation.
+- Do not silently upload user images or retain assets outside declared output locations.
 - Treat loopback debugging interfaces as a security-sensitive fallback, not a default assumption.
 
 ## Development
 
-Run the repository checks with Python 3.10 or later:
+Run checks with Python 3.10 or later. Skin builder tests require Pillow.
 
 ```bash
 python -m unittest discover -s tests -v
 python scripts/check_dependencies.py --json
 python scripts/validate_pet_package.py --help
 python scripts/validate_skin_package.py --help
-```
-
-Run the Git marketplace install smoke test in an isolated temporary `CODEX_HOME`:
-
-```bash
 python scripts/smoke_test_install.py --json
 ```
 
@@ -165,23 +169,14 @@ Licensed under [Apache-2.0](LICENSE). ChromaPaw is an independent community proj
 
 ## 中文说明
 
-ChromaPaw 是一个面向 Codex 的开源个性化工坊，目标是让用户只上传一张图片，就能生成：
+ChromaPaw 是一个面向 Codex 的开源个性化插件，目标是让用户只上传一张图片，就能生成：
 
 - 带任务状态动画的 Codex 自定义宠物；
-- 包含背景、环境元素、前景装饰和半透明面板的完整主题皮肤；
-- 可以预览、验证、切换和恢复的本地资产包。
+- 包含背景、海浪、沙滩、珊瑚等环境元素和立体层次的完整主题皮肤；
+- 可预览、校验、备份与恢复的本地资产包。
 
-当前 `0.2.1` 已实现可安装的桌面宠物 Beta：上传一张参考图后，可以整理工作中、等待、完成和失败等动作意图，调用完整的 Codex v2 宠物生成与 QA 流程，并在安装前校验 `8×11` 精灵图。安装同名宠物时必须明确确认，旧版本会先备份，之后可以恢复。
+当前 `0.3.0` 已完成 Skin Studio MVP：如果上传的是完整场景图，可以直接生成皮肤；如果只是人物、物体或风格参考，技能会先扩展成完整环境图，再自动提取浅色/深色配色，生成 3 套 CSS、6 张常见窗口比例预览、阅读安全区和 QA 报告。生成的 CSS 已内置宠物透明浮层隔离，避免宠物背后出现整块主题背景。
 
-安装命令：
+桌面宠物 Beta 也已可用：它通过兼容的 `hatch-pet` 工作流完成 8×11 精灵图和视觉 QA，并在安装前执行严格校验。同名宠物不会被静默覆盖，替换前会备份，之后可恢复。
 
-```bash
-codex plugin marketplace add chromapaw/codex-chromapaw --ref main
-codex plugin add codex-chromapaw@chromapaw
-```
-
-安装或更新后需要重启 Codex，并新建任务。宠物生成前会自动检查 `hatch-pet`；缺失时会安全停止，不会伪造不兼容的宠物包。
-
-例如，你可以直接说：“任务进行时让它拍篮球，任务完成后让它用篮球跳舞。”ChromaPaw 会把这些要求映射到 Codex 支持的动画行；任务状态本身仍由 Codex 控制。
-
-完整主题皮肤的生成规范已经存在，但实时应用皮肤的可逆运行时仍将在后续版本中实现。
+需要注意：`0.3.0` 可以完整生成和验证皮肤包，但还不会直接把皮肤注入正在运行的 Codex。可逆、带版本检查的 Windows 激活运行时属于下一阶段 `0.4`。

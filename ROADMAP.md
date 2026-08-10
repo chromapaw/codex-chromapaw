@@ -6,17 +6,15 @@
 - Separate pet, skin, and management skills.
 - Portable skin-package schema and validator.
 - Safety, architecture, contribution, and security documentation.
-- Dependency-free validation tests that can run on Windows, macOS, and Linux.
+- Dependency-free validation tests that run on Windows, macOS, and Linux.
 
 ## 0.2 — Desktop Pet MVP ✅
 
-- One-image input workflow built on the supported Codex `hatch-pet` pipeline.
+- One-image input workflow built on the Codex `hatch-pet` pipeline.
 - User-defined animation intent for working, waiting, ready, and failed states.
 - Mandatory contact-sheet, direction, and motion-preview review before installation.
 - Strict desktop v2 package validation for the 1536×2288 extended atlas.
 - Safe installation, explicit replacement, managed backup, and restore commands.
-
-Web upload/export is not claimed by `0.2.0`; it will be added only when an official, testable target contract is available.
 
 ## 0.2.1 — Installable Pet Beta ✅
 
@@ -26,12 +24,15 @@ Web upload/export is not claimed by `0.2.0`; it will be added only when an offic
 - Streaming validation for large lossless WebP pet atlases.
 - Versioned GitHub release and clean-install verification.
 
-## 0.3 — Skin Studio MVP
+## 0.3 — Skin Studio MVP ✅
 
-- Scene expansion and layered composition from one source image.
-- Palette extraction, safe content zones, readable surfaces, and preview rendering.
-- Versioned `skin.json`, CSS, background, and attribution bundle.
-- Built-in light/dark and common window-ratio variants.
+- Scene expansion workflow and four-layer composition from one source image.
+- Deterministic request preparation and package builder.
+- Automatic light/dark palette extraction with 4.5:1 text contrast gates.
+- Safe content zones, readable glass surfaces, and pet-overlay isolation CSS.
+- Versioned schemaVersion 2 manifest, three stylesheets, background, and attribution bundle.
+- Six built-in visual-QA previews covering light/dark and 16:10/16:9/4:3 windows.
+- Legacy schemaVersion 1 validation compatibility.
 
 ## 0.4 — Reversible Windows Runtime
 
@@ -39,6 +40,7 @@ Web upload/export is not claimed by `0.2.0`; it will be added only when an offic
 - Backup, activate, verify, stop, and restore lifecycle.
 - No modification of `WindowsApps` or official application archives.
 - Security review of any local debugging transport before release.
+- Compatibility tests that fail closed on unknown Codex versions.
 
 ## 0.5 — Cross-platform and ecosystem
 

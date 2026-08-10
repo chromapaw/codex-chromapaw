@@ -20,4 +20,4 @@ Manage customization state without assuming that a live skin runtime is installe
 
 Read [references/safety-model.md](references/safety-model.md) before any activate, restore, or remove operation.
 
-Version `0.2.x` includes a validated desktop-pet install, backup, and restore path. It still does not include a production live-skin runtime. If skin activation is requested without a supported runtime, stop after validation and preview, then explain the missing component.
+Version `0.3.x` includes a validated desktop-pet install, backup, and restore path plus portable Skin Studio v2 generation and visual QA. It still does not include a production live-skin runtime. If skin activation is requested without a supported runtime, stop after validation and preview, then explain the missing component.
