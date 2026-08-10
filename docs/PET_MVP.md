@@ -1,9 +1,15 @@
 # Desktop Pet MVP
 
-ChromaPaw `0.2.0` turns one local reference image plus a short behavior description into a reviewed Codex desktop v2 pet. It composes two layers instead of replacing the supported animation workflow:
+ChromaPaw `0.2.1` turns one local reference image plus a short behavior description into a reviewed Codex desktop v2 pet. It composes two layers instead of replacing the supported animation workflow:
 
 - ChromaPaw handles request normalization, package validation, installation, backup, and restore.
 - Codex's installed `hatch-pet` skill handles visual generation, deterministic atlas assembly, and visual QA.
+
+## Dependency preflight
+
+Before visual generation, ChromaPaw runs `scripts/check_dependencies.py --json`. It accepts a compatible `hatch-pet` directory from `--hatch-pet-dir`, `CHROMAPAW_HATCH_PET_DIR`, `$CODEX_HOME/skills/hatch-pet`, or `$CODEX_HOME/skills/.system/hatch-pet`, in that order. The check requires the skill manifest plus the preparation, extended-atlas assembly, and atlas-validation scripts.
+
+If no compatible directory is found, pet generation stops before creating visual assets. ChromaPaw reports every checked path and does not silently download, copy, or invent the external workflow.
 
 ## User flow
 
@@ -73,5 +79,5 @@ Restore also backs up the currently installed version, so a mistaken restore rem
 
 - The action descriptions shape the closest supported visual animation rows; they do not add Codex runtime states or change task execution.
 - ChromaPaw's validator checks package structure, path safety, image type, version, and dimensions. A generated pet still needs every hatch-pet deterministic and visual gate.
-- Version `0.2.0` targets local desktop v2 packages. It does not claim a web-upload export format.
+- Version `0.2.1` targets local desktop v2 packages. It does not claim a web-upload export format.
 - Pet installation does not modify `WindowsApps`, signed application files, or the Codex renderer.

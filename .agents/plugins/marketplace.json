@@ -1,0 +1,21 @@
+{
+  "name": "chromapaw",
+  "interface": {
+    "displayName": "ChromaPaw"
+  },
+  "plugins": [
+    {
+      "name": "codex-chromapaw",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/chromapaw/codex-chromapaw.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creativity"
+    }
+  ]
+}

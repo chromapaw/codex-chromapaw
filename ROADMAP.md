@@ -18,6 +18,14 @@
 
 Web upload/export is not claimed by `0.2.0`; it will be added only when an official, testable target contract is available.
 
+## 0.2.1 — Installable Pet Beta ✅
+
+- Git-backed `chromapaw` marketplace with install, update, and removal commands.
+- Dependency preflight for the external `hatch-pet` visual workflow.
+- Isolated `CODEX_HOME` marketplace-install smoke test.
+- Streaming validation for large lossless WebP pet atlases.
+- Versioned GitHub release and clean-install verification.
+
 ## 0.3 — Skin Studio MVP
 
 - Scene expansion and layered composition from one source image.

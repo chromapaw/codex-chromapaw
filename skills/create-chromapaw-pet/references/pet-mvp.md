@@ -2,9 +2,17 @@
 
 Use this contract for ChromaPaw `0.2.x` desktop pets.
 
-## 1. Resolve paths
+## 1. Resolve paths and dependencies
 
 Locate the repository root by walking two directories upward from this skill directory. Use the active Python 3.10-or-later executable for ChromaPaw's dependency-free scripts. Before invoking any bundled `$hatch-pet` script, follow `$hatch-pet`'s runtime-dependency instructions and use the workspace Python it selects.
+
+Run the dependency preflight before request preparation:
+
+```text
+python scripts/check_dependencies.py --json
+```
+
+Continue only when `dependencies.hatch-pet.available` is `true`. Use its returned `path` as the authoritative skill directory. If it is unavailable, report the checked paths and remediation message, then stop before image generation.
 
 Keep three locations separate:
 
