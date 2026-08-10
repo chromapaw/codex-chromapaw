@@ -1,6 +1,6 @@
 # Skin Studio MVP
 
-ChromaPaw 0.3 turns one reference image into a complete, portable skin bundle. It solves deterministic package construction and visual review; it deliberately does not inject CSS into a running Codex installation.
+ChromaPaw turns one reference image into a complete, portable skin bundle. Skin Studio owns deterministic package construction and visual review; activation remains a separate, explicitly authorized runtime operation.
 
 ## What one-image generation means
 
@@ -34,6 +34,6 @@ The generated CSS contains an explicit guard for Codex's transparent avatar over
 
 Request preparation and validation use the Python standard library. Building and preview rendering use Pillow. Inside Codex, use the bundled workspace Python runtime returned by the workspace dependency loader.
 
-## Current boundary
+## Activation boundary
 
-Skin Studio v2 packages are ready for preview, review, storage, and future runtime use. Live activation is scheduled for the reversible, version-gated runtime phase and is not claimed by 0.3.
+Skin Studio v2 packages are ready for preview, review, storage, and the experimental Windows Runtime Beta. Package validity does not imply runtime compatibility or activation consent. ChromaPaw 0.4 activates only an exact enabled Windows adapter after a separate preflight and acknowledgment; unsupported versions remain preview-only. See [WINDOWS_RUNTIME_BETA.md](WINDOWS_RUNTIME_BETA.md).

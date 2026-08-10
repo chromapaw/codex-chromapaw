@@ -1,12 +1,12 @@
 # Skin Studio v2 workflow
 
-Use this contract for ChromaPaw `0.3.x` portable skins. The dependency-free validator still accepts legacy schemaVersion 1 packages.
+Use this contract for ChromaPaw Skin Studio v2 portable skins. The dependency-free validator still accepts legacy schemaVersion 1 packages.
 
 ## 1. Keep three locations separate
 
 - reference/run directory: original image, optional generated environment, and `skin-request.json`
 - package directory: shareable v2 assets, metadata, previews, and QA
-- live Codex directory: untouched until a separately supported runtime is available
+- runtime state directory: used only by a separately authorized, supported runtime; Codex application files remain untouched
 
 Skin Studio never generates directly into Codex application files.
 
@@ -93,4 +93,4 @@ Inspect both light and dark 16:10 previews, then check the narrow-height 16:9 an
 
 ## 6. Activation boundary
 
-The stylesheets are portable package content, not permission to inject into Codex. ChromaPaw 0.3 creates and validates skins but does not activate them. A future version-gated runtime must own backup, activation, verification, stop, and restore.
+The stylesheets are portable package content, not permission to inject into Codex. Finish and validate the package first. If the user separately requests activation, hand off to `$manage-chromapaw`, which must run the 0.4 Windows Runtime Beta preflight and safety workflow. Unknown or disabled versions remain preview-only.

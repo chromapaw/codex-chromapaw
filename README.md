@@ -2,9 +2,9 @@
 
 Turn one image into a custom Codex skin or animated pet.
 
-> Version 0.3.0 ships the one-image Skin Studio MVP and the installable desktop Pet Beta. Skin packages can be generated and fully validated now; live skin activation remains separate until a reversible Codex runtime is available.
+> Version 0.4.0 adds an experimental, reversible Windows skin runtime. Skin and pet generation are available; live skin activation is limited to exact, isolated-live-verified Codex versions and is not an official OpenAI skin API.
 
-[中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
+[中文说明](#中文说明) · [Windows Runtime Beta](docs/WINDOWS_RUNTIME_BETA.md) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md)
 
 ## Vision
 
@@ -14,26 +14,6 @@ Turn one image into a custom Codex skin or animated pet.
 4. Validate it before installation or activation.
 5. Switch or restore safely.
 
-## Capabilities
-
-### Skin Studio MVP
-
-- Turn a full environment image directly into a skin, or expand a character/object reference into complete environmental artwork first.
-- Extract accessible light and dark palettes automatically.
-- Generate light, dark, and adaptive CSS with readable glass surfaces.
-- Render six visual-QA previews: light/dark × 16:10/16:9/4:3.
-- Record a normalized safe content zone, atmosphere/distant/midground/foreground depth layers, source attribution, and structured QA.
-- Isolate Codex's transparent avatar overlay so a theme background cannot appear as a rectangle behind a pet.
-- Export a portable schemaVersion 2 package without modifying a live Codex installation.
-
-### Animated pets
-
-- Preserve the subject's recognizable silhouette, palette, face, clothing, and props.
-- Generate task-aware animation intent such as working, waiting, ready, and failed.
-- Build and validate a Codex-compatible desktop v2 pet package through a compatible installed `hatch-pet` workflow.
-- Produce contact sheets and motion previews before installation.
-- Refuse silent replacement, back up an existing matching id, and restore managed backups.
-
 ## Current status
 
 | Area | Status |
@@ -41,16 +21,45 @@ Turn one image into a custom Codex skin or animated pet.
 | Plugin manifest and Git marketplace | Available |
 | One-image Skin Studio v2 package | Available |
 | Automatic palette, CSS, six previews, and QA | Available |
-| Legacy skin v1 validation | Compatible |
 | One-image desktop Pet Beta | Available |
-| Pet package validation/install/restore | Available |
-| Live Codex skin activation | Planned for 0.4 |
-| Reversible Windows runtime | Planned for 0.4 |
+| Pet validation, install, backup, and restore | Available |
+| Reversible Windows skin runtime | Experimental Beta for exact verified versions |
+| Official AppX `26.803.5235.0` | Discoverable; activation disabled |
 | macOS runtime | Planned |
+
+## Capabilities
+
+### Skin Studio
+
+- Turn full environment artwork directly into a skin, or expand a character/object reference into complete environmental artwork first.
+- Extract accessible light and dark palettes and generate light, dark, and adaptive CSS.
+- Render six visual-QA previews across three common window ratios.
+- Record safe content zones, four depth layers, attribution, and structured QA.
+- Isolate Codex's transparent avatar overlay so the skin does not become a rectangle behind a pet.
+- Export a portable schemaVersion 2 package independently from runtime compatibility.
+
+### Animated pets
+
+- Preserve the subject's silhouette, palette, face, clothing, and props.
+- Map task intent such as working, waiting, ready, and failed onto Codex-compatible animation rows.
+- Build and visually validate an 8×11 desktop v2 atlas through a compatible installed `hatch-pet` workflow.
+- Refuse silent replacement, back up an existing matching id, and restore managed backups.
+
+### Windows Runtime Beta
+
+- Discover local standalone and AppX Codex candidates.
+- Fail closed on unknown or recognized-but-disabled versions.
+- Validate the package, exact executable version, executable hash, adapter identity, and running processes before launch.
+- Launch a supported Codex build with an ephemeral CDP endpoint bound only to `127.0.0.1`.
+- Inject skin CSS into eligible `app://` pages without changing `WindowsApps`, `app.asar`, or signed application files.
+- Keep delayed windows such as the pet overlay synchronized with a disclosed local monitor.
+- Verify, stop, and restore the session, terminate only the runtime-launched process tree, and confirm that the debugging port closed.
+
+The runtime uses an experimental Electron interface because Codex does not document a public desktop skin API. Read [docs/WINDOWS_RUNTIME_BETA.md](docs/WINDOWS_RUNTIME_BETA.md) before activation.
 
 ## Install
 
-ChromaPaw requires a Codex build with plugin marketplace commands and Git available on `PATH`.
+ChromaPaw requires a Codex build with plugin marketplace commands and Git on `PATH`.
 
 ```bash
 codex plugin marketplace add chromapaw/codex-chromapaw --ref main
@@ -59,7 +68,7 @@ codex plugin add codex-chromapaw@chromapaw
 
 Restart Codex and open a new task so the three ChromaPaw skills are discovered. Attach an image and invoke `$create-chromapaw-skin` or `$create-chromapaw-pet`.
 
-Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw checks this dependency before generation and does not silently download or vendor it.
+Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw checks this dependency and does not silently download or vendor it.
 
 ### Update
 
@@ -72,7 +81,11 @@ Restart Codex and use a new task after updating.
 
 ### Uninstall
 
+Restore any active Windows runtime session before uninstalling:
+
 ```bash
+python scripts/windows_runtime.py --json status
+python scripts/windows_runtime.py --json restore
 codex plugin remove codex-chromapaw@chromapaw
 codex plugin marketplace remove chromapaw
 ```
@@ -81,11 +94,9 @@ codex plugin marketplace remove chromapaw
 
 - `$create-chromapaw-skin` — create and validate a layered Skin Studio v2 package from one image.
 - `$create-chromapaw-pet` — create, review, validate, and optionally install an animated Codex pet.
-- `$manage-chromapaw` — inspect packages and use supported preview, activation, or recovery paths.
+- `$manage-chromapaw` — inspect packages and use supported activation, verification, and recovery paths.
 
 ## Skin quick start
-
-In Codex, attach one image and ask:
 
 ```text
 Use $create-chromapaw-skin to turn this into a fresh summer beach theme.
@@ -93,9 +104,7 @@ Keep the beach, waves, sand, and coral visible around readable glass panels,
 and generate both light and dark previews.
 ```
 
-The skill inspects the reference, creates expanded environmental artwork when necessary, builds the package, and reviews all six variants. It will not claim that the skin is active.
-
-From a repository checkout, build from existing full-scene artwork with the Codex workspace Python runtime:
+From a repository checkout, build and validate a package:
 
 ```bash
 python scripts/prepare_skin_request.py --image scene.png --mode adaptive --output-dir run
@@ -103,7 +112,7 @@ python scripts/build_skin_package.py --request run/skin-request.json --output-di
 python scripts/validate_skin_package.py package --json
 ```
 
-The builder requires Pillow, available in Codex's workspace runtime or installable from `requirements-skin.txt`. See [docs/SKIN_STUDIO_MVP.md](docs/SKIN_STUDIO_MVP.md) for the v2 output contract and review gates.
+The builder requires Pillow, available in Codex's workspace runtime or installable from `requirements-skin.txt`.
 
 ## Pet quick start
 
@@ -112,8 +121,6 @@ Use $create-chromapaw-pet to make this my Codex pet. While a task is running,
 have it dribble and shoot a basketball. When the task finishes, have it dance
 with the basketball.
 ```
-
-The skill prepares the request, delegates complete 8×11 generation and visual QA to `hatch-pet`, stages the package, and installs only after validation. Runtime timing remains controlled by Codex; requested behavior is mapped onto the closest supported animation rows.
 
 For an already generated package:
 
@@ -129,39 +136,54 @@ python scripts/install_pet.py path/to/pet-package --replace --json
 python scripts/restore_pet.py backup-directory-name --replace --json
 ```
 
+## Windows runtime quick start
+
+Run these commands from a trusted repository checkout. Do not activate until `preflight` reports an enabled exact-version adapter and the selected executable is closed.
+
+```bash
+python scripts/windows_runtime.py --json discover
+python scripts/windows_runtime.py --json preflight path/to/skin-package --executable "C:\\path\\to\\ChatGPT.exe"
+python scripts/windows_runtime.py --json activate path/to/skin-package --executable "C:\\path\\to\\ChatGPT.exe" --acknowledge-experimental-runtime
+python scripts/windows_runtime.py --json verify
+python scripts/windows_runtime.py --json restore
+```
+
+Activation launches a separate Codex process owned by the runtime. Restore stops that process so the unauthenticated loopback CDP endpoint cannot remain open. `--allow-parallel-profile` is for isolated compatibility testing only.
+
 ## Repository layout
 
 ```text
 .agents/plugins/        Git-backed marketplace metadata
 .codex-plugin/          Plugin manifest
 skills/                 Codex workflows
-scripts/                Deterministic package tooling
-schemas/                Portable package schemas
-tests/                  Validation tests
-docs/                   Architecture and design notes
+scripts/                Deterministic package and runtime tooling
+runtime/                Exact-version adapter registry
+schemas/                Portable package and adapter schemas
+tests/                  Unit and compatibility-fixture tests
+docs/                   Architecture, security, and operating guides
 ```
 
 ## Safety principles
 
-- Never modify `WindowsApps` or the official Codex application archive.
-- Back up user configuration before any future activation or restore operation.
-- Keep skin generation separate from live activation.
+- Never modify `WindowsApps`, `app.asar`, or signed Codex application files.
+- Keep image/package generation separate from live activation.
+- Require explicit experimental-runtime acknowledgment for activation.
+- Bind CDP to a random loopback port, disclose the monitor, and close both during restore.
+- Preserve user configuration changes; only a known volatile Codex session key may be restored when every other config line is unchanged.
 - Do not silently upload user images or retain assets outside declared output locations.
-- Treat loopback debugging interfaces as a security-sensitive fallback, not a default assumption.
 
 ## Development
 
-Run checks with Python 3.10 or later. Skin builder tests require Pillow.
+Use Python 3.10 or later. Skin builder tests require Pillow.
 
 ```bash
 python -m unittest discover -s tests -v
 python scripts/check_dependencies.py --json
-python scripts/validate_pet_package.py --help
-python scripts/validate_skin_package.py --help
+python scripts/windows_runtime.py --json discover
 python scripts/smoke_test_install.py --json
 ```
 
-Plugin and skill structure should also be checked with the validators bundled with Codex's `plugin-creator` and `skill-creator` skills before release.
+Plugin and skill structure must also pass the validators bundled with Codex's `plugin-creator` and `skill-creator` skills before release.
 
 ## License and trademark
 
@@ -169,14 +191,12 @@ Licensed under [Apache-2.0](LICENSE). ChromaPaw is an independent community proj
 
 ## 中文说明
 
-ChromaPaw 是一个面向 Codex 的开源个性化插件，目标是让用户只上传一张图片，就能生成：
+ChromaPaw 是一个面向 Codex 的开源个性化插件。目标是让用户只上传一张图片，就能生成：
 
 - 带任务状态动画的 Codex 自定义宠物；
-- 包含背景、海浪、沙滩、珊瑚等环境元素和立体层次的完整主题皮肤；
-- 可预览、校验、备份与恢复的本地资产包。
+- 包含海滩、海浪、沙滩、珊瑚等环境元素和立体层次的完整主题皮肤；
+- 可预览、校验、备份与恢复的本地资源包。
 
-当前 `0.3.0` 已完成 Skin Studio MVP：如果上传的是完整场景图，可以直接生成皮肤；如果只是人物、物体或风格参考，技能会先扩展成完整环境图，再自动提取浅色/深色配色，生成 3 套 CSS、6 张常见窗口比例预览、阅读安全区和 QA 报告。生成的 CSS 已内置宠物透明浮层隔离，避免宠物背后出现整块主题背景。
+`0.4.0` 已完成皮肤包生成、宠物生成与实验性 Windows 皮肤运行时。运行时不会修改 `WindowsApps`、`app.asar` 或签名文件，而是启动一个受版本白名单约束的 Codex 进程，通过仅绑定本机随机端口的实验性接口注入皮肤，并在还原时关闭该进程、后台监控和端口。
 
-桌面宠物 Beta 也已可用：它通过兼容的 `hatch-pet` 工作流完成 8×11 精灵图和视觉 QA，并在安装前执行严格校验。同名宠物不会被静默覆盖，替换前会备份，之后可恢复。
-
-需要注意：`0.3.0` 可以完整生成和验证皮肤包，但还不会直接把皮肤注入正在运行的 Codex。可逆、带版本检查的 Windows 激活运行时属于下一阶段 `0.4`。
+需要注意：这不是 OpenAI 官方皮肤 API。只有经过隔离实测的精确 Codex 版本才允许激活；未知版本以及当前已识别但未通过启动验证的官方 AppX 版本都会安全拒绝。宠物包仍可正常生成、安装和恢复，皮肤包也可正常生成和预览，这两部分不依赖实验性运行时。

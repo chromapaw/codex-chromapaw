@@ -24,7 +24,7 @@ except ImportError as exc:  # pragma: no cover - exercised by CLI environments
 from skin_package import PREVIEW_DIMENSIONS, contrast_ratio
 
 
-GENERATOR_VERSION = "0.3.0"
+GENERATOR_VERSION = "0.4.0"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 

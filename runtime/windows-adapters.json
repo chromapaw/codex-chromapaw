@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "transport": {
+    "kind": "electron-cdp-loopback",
+    "host": "127.0.0.1",
+    "port": "ephemeral",
+    "backgroundMonitor": {
+      "enabled": true,
+      "intervalSeconds": 1.0
+    }
+  },
+  "adapters": [
+    {
+      "id": "chatgpt-electron-26-707-9981",
+      "appVersion": "26.707.9981.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": true,
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Managed standalone copy; isolated live activation, main/avatar verification, and restore passed on 2026-08-10"
+    },
+    {
+      "id": "chatgpt-electron-26-803-5235",
+      "appVersion": "26.803.5235.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": false,
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Official AppX discovered on 2026-08-10; protected-package direct launch rejected with WinError 5, so activation remains disabled"
+    }
+  ]
+}

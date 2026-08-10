@@ -21,7 +21,7 @@ Read [references/skin-package.md](references/skin-package.md) before preparing, 
 8. Run `scripts/build_skin_package.py`. It must produce the background, automatic light and dark palettes, adaptive and fixed CSS, six common-ratio previews, safe-zone metadata, attribution, and structured QA report.
 9. Run `scripts/validate_skin_package.py <package> --json`. Do not present a failed package as complete.
 10. Visually inspect both light and dark 16:10 previews plus the 16:9 and 4:3 edge cases. Confirm that scenery remains visible, text panels are readable, foreground decoration does not cover the input area, and no preview is merely a flat color.
-11. Present the primary preview, package path, extracted palette, six-variant QA result, and validation output. Do not activate or inject the CSS in Codex during the 0.3 workflow.
+11. Present the primary preview, package path, extracted palette, six-variant QA result, and validation output. Do not activate as an implicit part of creation. If the user separately requested activation, complete validation first and then follow `$manage-chromapaw` and its required safety model.
 
 ## Quality gates
 
@@ -35,6 +35,6 @@ Read [references/skin-package.md](references/skin-package.md) before preparing, 
 ## Safety
 
 - Keep the request/run directory separate from the portable package directory.
-- Do not modify `WindowsApps`, signed Codex files, or a live Codex installation.
-- Do not claim that portable CSS is currently activated.
+- Do not modify `WindowsApps`, signed Codex files, `app.asar`, or a live Codex installation.
+- Do not claim that portable CSS is activated unless the separate runtime verification passed in the current operation.
 - Treat unlicensed logos, characters, and images as private-use references unless the user provides distribution rights.

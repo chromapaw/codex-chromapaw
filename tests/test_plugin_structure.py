@@ -12,7 +12,7 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"], "0.3.0")
+        self.assertEqual(manifest["version"], "0.4.0")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -61,6 +61,18 @@ class PluginStructureTests(unittest.TestCase):
             "skills/create-chromapaw-skin/references/skin-package.md",
             "docs/SKIN_STUDIO_MVP.md",
             "requirements-skin.txt",
+        )
+        for relative in expected:
+            self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_windows_runtime_beta_assets_exist(self) -> None:
+        expected = (
+            "runtime/windows-adapters.json",
+            "schemas/windows-runtime-adapters.schema.json",
+            "scripts/cdp_client.py",
+            "scripts/windows_runtime.py",
+            "tests/test_windows_runtime.py",
+            "docs/WINDOWS_RUNTIME_BETA.md",
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
