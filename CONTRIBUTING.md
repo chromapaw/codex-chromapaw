@@ -13,12 +13,12 @@ Thank you for helping make Codex customization safer and more approachable.
 ## Development checks
 
 ```bash
-python -m py_compile scripts/*.py
-python -m unittest discover -s tests -v
+python scripts/release_check.py
 python scripts/check_dependencies.py --json
+python scripts/audit_pets.py --json --allow-issues
 ```
 
-Before release, validate the plugin and all skills with the scripts bundled with Codex's `plugin-creator` and `skill-creator` skills. Run the isolated marketplace installation smoke test after pushing the candidate commit.
+Before release, validate the plugin and all skills with the scripts bundled with Codex's `plugin-creator` and `skill-creator` skills. Run the isolated marketplace installation smoke test after pushing the candidate commit and complete [the release checklist](docs/RELEASE_CHECKLIST.md).
 
 ## Windows adapter acceptance
 

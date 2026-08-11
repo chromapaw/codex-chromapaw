@@ -14,9 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from build_skin_package import build_package  # noqa: E402
+from build_skin_package import build_package, semantic_ui_palette  # noqa: E402
 from prepare_skin_request import build_request  # noqa: E402
 from prepare_theme_profile import build_profile as build_theme_profile  # noqa: E402
+from skin_package import contrast_ratio  # noqa: E402
 from theme_profile import ThemeProfileError, normalize_theme_profile  # noqa: E402
 from validate_skin_package import validate_package  # noqa: E402
 
@@ -169,6 +170,58 @@ class SkinPackageValidationTests(unittest.TestCase):
             css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
             self.assertIn('data-avatar-overlay-content-frame="true"', css)
             self.assertIn('background-image: url("./background.png")', css)
+            self.assertIn(
+                "--color-token-text-primary: var(--chromapaw-ink) !important",
+                css,
+            )
+            self.assertIn(
+                "--vscode-titleBar-activeForeground: var(--chromapaw-ink) !important",
+                css,
+            )
+            self.assertIn(
+                "--color-token-input-background: rgb(var(--chromapaw-surface-input-rgb)",
+                css,
+            )
+            report = json.loads(
+                (package / "qa" / "skin-studio-report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(set(report["uiPalettes"]), {"light", "dark"})
+            self.assertTrue(
+                all(
+                    check["status"] == "pass"
+                    for check in report["checks"]
+                    if "-ui-" in check["id"]
+                )
+            )
+
+    def test_semantic_ui_palette_keeps_muted_and_accent_text_accessible(self) -> None:
+        for mode, palette in (
+            (
+                "dark",
+                {
+                    "surface": "#081523",
+                    "ink": "#F2F8F8",
+                    "accent": "#0A49E0",
+                    "panelOpacity": 0.82,
+                },
+            ),
+            (
+                "light",
+                {
+                    "surface": "#E9EBF0",
+                    "ink": "#122A30",
+                    "accent": "#093FC2",
+                    "panelOpacity": 0.78,
+                },
+            ),
+        ):
+            ui = semantic_ui_palette(palette, mode)
+            for role in ("primaryText", "secondaryText", "mutedText", "accentText"):
+                self.assertGreaterEqual(
+                    contrast_ratio(ui["surface"], ui[role]),
+                    4.5,
+                    f"{mode} {role}",
+                )
 
     def test_non_beach_theme_profiles_remain_semantically_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -2,9 +2,9 @@
 
 Turn one uploaded image into an image-specific Codex skin or animated pet.
 
-> Version 0.4.1 adds source-bound semantic theme profiles and a read-only macOS compatibility probe. Package generation is separate from live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
+> Version 0.4.5 adds separate reversible `Codex ChromaPaw` Desktop and Start Menu shortcuts that remember the last validated skin without replacing the application-managed ChatGPT entry. Package generation remains separate from live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
 
-[中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Windows Runtime Beta](docs/WINDOWS_RUNTIME_BETA.md) · [macOS probe](docs/MACOS_COMPATIBILITY.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md)
+[中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Windows Runtime Beta](docs/WINDOWS_RUNTIME_BETA.md) · [macOS probe](docs/MACOS_COMPATIBILITY.md) · [Release checklist](docs/RELEASE_CHECKLIST.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md)
 
 ## One-image workflow
 
@@ -24,6 +24,7 @@ For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing 
 | One-image pet package generation | Implemented with `hatch-pet` | Platform-neutral implementation; real-Mac validation pending |
 | Pet package validation/install/restore | Implemented | Implementation present; real-Mac validation pending |
 | Live skin activation | Experimental, exact-version adapters only | Not implemented |
+| Skin relaunch after closing Codex | Explicit, reversible ChromaPaw Desktop and Start Menu shortcuts | Not implemented |
 | Compatibility discovery | Implemented | Read-only probe implemented |
 
 On the current Windows development machine, standalone Codex `26.707.9981.0` has an enabled experimental adapter. The official AppX `26.803.5235.0` is discoverable but activation remains disabled. Unknown versions fail closed.
@@ -34,6 +35,8 @@ On the current Windows development machine, standalone Codex `26.707.9981.0` has
 
 - Classify an upload as a full environment, subject, texture, abstract cue, or logo.
 - Bind the semantic theme profile to the original image hash and reject mismatches or motif/exclusion contradictions.
+- Derive primary, secondary, muted, accent, on-accent, elevated, and input colors for both light and dark variants, with a minimum 4.5:1 text contrast gate.
+- Override Codex and VS Code semantic UI tokens so the uploaded background cannot leave menus or navigation using unreadable host-theme colors.
 - Use a full environment directly, or expand a smaller cue into image-specific scene artwork first.
 - Extract accessible light and dark palettes and generate light, dark, and adaptive CSS.
 - Render six visual-QA previews across 16:10, 16:9, and 4:3 window ratios.
@@ -53,6 +56,9 @@ On the current Windows development machine, standalone Codex `26.707.9981.0` has
 - `scripts/platform_capabilities.py --json` reports generation readiness, pet dependencies, and platform activation boundaries.
 - Non-environment skin uploads require Codex's image-generation capability for scene expansion; full environment uploads can proceed directly to deterministic packaging.
 - The Windows Runtime Beta validates an exact adapter and uses a temporary loopback-only runtime without editing `WindowsApps`, `app.asar`, or signed application files.
+- A successful Windows activation remembers only package/executable/adapter identities and hashes. It never stores the session token or debugging port as a relaunch preference.
+- The optional Windows integration leaves `ChatGPT.lnk` untouched, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
+- `scripts/audit_pets.py` reports valid v2, legacy v1, and invalid installed pets without changing any files.
 - The macOS tool reads bundle metadata and validates a package but cannot activate it.
 
 ## Install
@@ -77,6 +83,15 @@ codex plugin add codex-chromapaw@chromapaw
 
 Restart Codex and use a new task after updating.
 
+### Release checks
+
+```bash
+python scripts/release_check.py
+python scripts/audit_pets.py --json --allow-issues
+```
+
+See [the release checklist](docs/RELEASE_CHECKLIST.md) for real-image, clean-install, and exact-version platform gates.
+
 ### Uninstall
 
 Restore any active Windows runtime session before uninstalling:
@@ -84,6 +99,7 @@ Restore any active Windows runtime session before uninstalling:
 ```bash
 python scripts/windows_runtime.py --json status
 python scripts/windows_runtime.py --json restore
+python scripts/windows_shortcut.py --json restore
 codex plugin remove codex-chromapaw@chromapaw
 codex plugin marketplace remove chromapaw
 ```

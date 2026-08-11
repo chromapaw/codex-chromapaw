@@ -1,6 +1,6 @@
 ---
 name: manage-chromapaw
-description: Inspect, validate, preview, activate, verify, stop, remove, or restore ChromaPaw skin and pet customizations. Use when a user asks what ChromaPaw assets are installed, wants to activate a supported Windows skin, return to the official Codex appearance, recover from a broken customization, or understand runtime compatibility and safety.
+description: Inspect, validate, preview, activate, resume, verify, stop, remove, or restore ChromaPaw skin and pet customizations. Use when a user asks what ChromaPaw assets are installed, wants to activate or persist a supported Windows skin, return to the official Codex appearance, recover from a broken customization, or understand runtime compatibility and safety.
 ---
 
 # Manage ChromaPaw
@@ -9,7 +9,7 @@ Manage customization state while treating package creation, pet installation, an
 
 ## Required safety model
 
-Read [references/safety-model.md](references/safety-model.md) completely before any activate, stop, restore, replace, or remove operation. Tell the user whenever this safety model causes an activation to pause or fail closed.
+Read [references/safety-model.md](references/safety-model.md) completely before any activate, resume, shortcut install, stop, restore, replace, or remove operation. Tell the user whenever this safety model causes an operation to pause or fail closed.
 
 ## Choose the operation
 
@@ -17,6 +17,8 @@ Read [references/safety-model.md](references/safety-model.md) completely before 
 - **Validate:** run `scripts/validate_skin_package.py` for skins or `scripts/validate_pet_package.py` for desktop v2 pets and report every failure.
 - **Preview:** display package previews without activating the skin.
 - **Activate skin:** use the Windows Runtime Beta only after the exact-version gates and explicit acknowledgment below pass.
+- **Resume skin:** relaunch the last successfully activated Windows skin only after all saved package, executable, version, CSS, and adapter identities still match.
+- **Install persistent entries:** after separate consent, confirm the original Start Menu target and add distinctly named, semantic-ownership-hashed ChromaPaw Desktop and Start Menu launchers without modifying the original entry.
 - **Probe macOS:** use `scripts/macos_compat.py` only to collect read-only app metadata and package compatibility. There is no macOS activation command yet.
 - **Install or restore pet:** use `scripts/install_pet.py` or `scripts/restore_pet.py`; replacement must remain explicit and backup-backed.
 - **Stop or restore skin:** use the active runtime state. Never reconstruct session identifiers, ports, process ids, or backup paths from guesses.
@@ -76,9 +78,35 @@ Require `verify` to report:
 
 The monitor should repair a delayed unstyled target automatically. Use `verify --repair` only as an explicit diagnostic; if the package hash changed, restore and activate again.
 
+A successful activation writes `preferred-skin.json` with restart-safe identities and hashes. It must not persist the session token, CDP port, target ids, titles, or conversation content.
+
 Never use `--allow-parallel-profile` for ordinary activation. It exists only for an isolated compatibility fixture with a separate `--profile-dir`.
 
-### 4. Inspect and capture
+### 4. Resume and optional persistent shortcut
+
+After the user closes the runtime-launched Codex, resume the last successfully activated skin with:
+
+```bash
+python scripts/windows_runtime.py --json resume --acknowledge-experimental-runtime
+```
+
+Resume must recover only a stale ended session and then re-run the exact package, executable, CSS, app-version, adapter-id, and adapter-file hash gates. Refuse resume when an ordinary instance of the selected executable is already running or any continuity check changed.
+
+The normal application-managed ChatGPT shortcut does not include the experimental runtime arguments and may be recreated by Codex. Never replace it. Installing separate `Codex ChromaPaw.lnk` Desktop and Start Menu entries is a state-changing operation. Display both managed shortcut paths plus the original path, the target executable, launcher, and absence of login/background auto-start behavior. Proceed only after the user explicitly agrees to add the shortcuts:
+
+```bash
+python scripts/windows_shortcut.py --json install --executable <ChatGPT.exe> --acknowledge-adds-windows-shortcuts
+```
+
+Require the installer to verify the original target and both new entries' targets, arguments, working directories, icons, descriptions, and semantic ownership hashes. Windows may rewrite `.lnk` binary tracking data after a click, so whole-file hashes are informational only. To remove both ChromaPaw entries:
+
+```bash
+python scripts/windows_shortcut.py --json restore
+```
+
+Never overwrite the original application shortcut. Remove the separate ChromaPaw entries only when both semantic receipt ownership hashes still match.
+
+### 5. Inspect and capture
 
 ```bash
 python scripts/windows_runtime.py --json status
@@ -92,7 +120,7 @@ python scripts/windows_runtime.py --json capture --output <private-output.png> -
 
 Do not publish a live capture without separate user permission.
 
-### 5. Stop or restore
+### 6. Stop or restore
 
 ```bash
 python scripts/windows_runtime.py --json restore
@@ -102,8 +130,8 @@ python scripts/windows_runtime.py --json restore
 
 Report whether the original Codex config hash was restored. The runtime may restore only allowlisted volatile app-session keys when every other configuration line is unchanged; it must preserve unrelated user changes.
 
-After restore, the user may launch Codex normally without the debugging arguments.
+After restore, the user may launch Codex normally without the debugging arguments. Restoring the active runtime does not remove the optional ChromaPaw shortcut; remove it separately when the user no longer wants that additional launcher.
 
 ## Current compatibility
 
-Version `0.4.1` enables Windows activation only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json`. The locally discovered official AppX `26.803.5235.0` remains disabled because protected package execution rejected the required isolated runtime launch. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.
+Version `0.4.5` enables Windows activation and resume only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json`. The locally discovered official AppX `26.803.5235.0` remains disabled because protected package execution rejected the required isolated runtime launch. The separate persistent shortcuts are Windows-only. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.

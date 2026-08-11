@@ -15,8 +15,9 @@ flowchart LR
     D -->|"No"| E["Generate profile-specific scene"]
     E --> F
     F --> G["Extract light and dark palettes"]
-    G --> H["Build CSS and six previews"]
-    H --> I["Validate semantics, package, and QA"]
+    G --> H["Derive contrast-safe semantic UI roles"]
+    H --> K["Build CSS and six previews"]
+    K --> I["Validate semantics, package, and QA"]
     I --> J["Portable skin v2"]
 ```
 
@@ -37,13 +38,15 @@ The four layers describe spatial depth, not fixed scenery. A motif cannot also b
 
 - a normalized PNG background capped at 2400×2400;
 - automatic light and dark palettes with at least 4.5:1 surface-to-ink contrast;
+- contrast-safe primary, secondary, muted, accent, on-accent, elevated-surface, and input-surface roles for each mode;
+- Codex and VS Code semantic token overrides for menus, title bars, navigation, editors, inputs, lists, toolbars, and terminals;
 - light, dark, and adaptive stylesheets;
 - six UI previews covering light/dark and 16:10, 16:9, and 4:3 windows;
 - source-bound semantic profile, safe-content-zone, and four-layer depth metadata;
 - source attribution that does not publish local image paths;
 - structured QA with contrast, ratio coverage, semantic-profile, and pet-overlay-isolation checks.
 
-The generated CSS contains an explicit guard for Codex's transparent avatar overlay. This prevents the skin background from being painted into the pet window as a rectangular block.
+The generated CSS contains an explicit guard for Codex's transparent avatar overlay. This prevents the skin background from being painted into the pet window as a rectangular block. Semantic text roles are tested independently against their surfaces so a dark upload cannot inherit dark host-theme text, and a light upload cannot inherit low-contrast light text.
 
 ## Build dependency
 

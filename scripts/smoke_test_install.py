@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import json
 import os
 import shutil
@@ -16,6 +17,7 @@ from typing import Any
 
 PLUGIN_NAME = "codex-chromapaw"
 MARKETPLACE_NAME = "chromapaw"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class SmokeTestError(RuntimeError):
@@ -67,6 +69,58 @@ def write_mock_hatch_pet(codex_home: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# isolated smoke-test fixture\n", encoding="utf-8")
     return root
+
+
+def stage_local_marketplace(plugin_root: Path, staging_root: Path) -> Path:
+    """Create a temporary marketplace whose plugin source is the current worktree."""
+    plugin_root = plugin_root.expanduser().resolve()
+    if not (plugin_root / ".codex-plugin" / "plugin.json").is_file():
+        raise SmokeTestError(f"local plugin source has no manifest: {plugin_root}")
+    marketplace_root = staging_root.expanduser().resolve()
+    staged_plugin = marketplace_root / "plugins" / PLUGIN_NAME
+    shutil.copytree(
+        plugin_root,
+        staged_plugin,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "__pycache__",
+            "*.pyc",
+            "build",
+            "dist",
+            "generated",
+            "work",
+        ),
+    )
+    marketplace_file = marketplace_root / ".agents" / "plugins" / "marketplace.json"
+    marketplace_file.parent.mkdir(parents=True)
+    marketplace_file.write_text(
+        json.dumps(
+            {
+                "name": MARKETPLACE_NAME,
+                "interface": {"displayName": "ChromaPaw local smoke test"},
+                "plugins": [
+                    {
+                        "name": PLUGIN_NAME,
+                        "source": {
+                            "source": "local",
+                            "path": f"./plugins/{PLUGIN_NAME}",
+                        },
+                        "policy": {
+                            "installation": "AVAILABLE",
+                            "authentication": "ON_INSTALL",
+                        },
+                        "category": "Creativity",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return marketplace_root
 
 
 def smoke_test(
@@ -146,18 +200,32 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        if args.codex_home:
-            home = args.codex_home.expanduser().resolve()
-            home.mkdir(parents=True, exist_ok=True)
-            result = smoke_test(args.codex, args.source, args.ref or None, home)
-        else:
-            with tempfile.TemporaryDirectory(prefix="chromapaw-codex-home-") as temporary:
-                result = smoke_test(
-                    args.codex,
-                    args.source,
-                    args.ref or None,
-                    Path(temporary).resolve(),
+        with ExitStack() as stack:
+            work_root = ROOT / "work"
+            work_root.mkdir(exist_ok=True)
+            if args.codex_home:
+                home = args.codex_home.expanduser().resolve()
+                home.mkdir(parents=True, exist_ok=True)
+            else:
+                temporary = stack.enter_context(
+                    tempfile.TemporaryDirectory(prefix="chromapaw-codex-home-", dir=work_root)
                 )
+                home = Path(temporary).resolve()
+
+            source = args.source
+            ref = args.ref or None
+            local_source = Path(source).expanduser()
+            if local_source.is_dir():
+                staging = Path(
+                    stack.enter_context(
+                        tempfile.TemporaryDirectory(
+                            prefix="chromapaw-local-marketplace-", dir=work_root
+                        )
+                    )
+                )
+                source = str(stage_local_marketplace(local_source, staging))
+                ref = None
+            result = smoke_test(args.codex, source, ref, home)
     except (OSError, SmokeTestError, json.JSONDecodeError) as exc:
         result = {"ok": False, "error": str(exc)}
         if args.json:

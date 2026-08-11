@@ -47,6 +47,15 @@
 - Report generation, pet-dependency, and activation readiness separately.
 - Discover macOS app bundles and collect read-only preflight evidence without implementing activation.
 
+## 0.4.5 — Release-candidate hardening
+
+- Persist the last validated Windows skin through separate Desktop and Start Menu launchers.
+- Keep the application-managed shortcut untouched and verify semantic ownership before removal.
+- Add cross-platform CI and one-command release checks.
+- Detect legacy and invalid installed pets without silently deleting or replacing them.
+- Maintain deterministic input-shape coverage plus a real-image release regression matrix.
+- Require a clean GitHub installation smoke test before the public tag is considered verified.
+
 ## 0.4.x — Runtime hardening
 
 - Add adapters only after exact-version isolated live verification.

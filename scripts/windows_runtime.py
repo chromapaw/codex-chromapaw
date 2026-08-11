@@ -33,10 +33,11 @@ except ImportError:
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.0"
+RUNTIME_VERSION = "0.4.4"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ADAPTERS = ROOT / "runtime" / "windows-adapters.json"
 ACTIVE_FILE = "active.json"
+PREFERENCE_FILE = "preferred-skin.json"
 LOCK_FILE = ".runtime.lock"
 STYLE_MARKER = 'data-avatar-overlay-content-frame="true"'
 BACKGROUND_URL = re.compile(r"url\(\s*(['\"]?)\./background\.png\1\s*\)")
@@ -323,6 +324,59 @@ def running_pids(executable: Path) -> list[int]:
     )
 
 
+def close_matching_codex_processes(
+    executable: Path,
+    *,
+    acknowledged: bool,
+    timeout: float = 12.0,
+) -> dict[str, Any]:
+    if not acknowledged:
+        raise RuntimeFailure("closing a running Codex requires explicit user confirmation")
+    if os.name != "nt":
+        raise RuntimeFailure("closing a selected Codex process group is Windows-only")
+    executable = executable.expanduser().resolve()
+    expected = os.path.normcase(str(executable))
+    initial = running_pids(executable)
+    if not initial:
+        return {"closed": False, "reason": "not-running", "pids": []}
+
+    attempted: list[int] = []
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = running_pids(executable)
+        if not current:
+            return {
+                "closed": True,
+                "reason": "user-confirmed-relaunch",
+                "pids": initial,
+                "attemptedPids": attempted,
+            }
+        paths = _windows_process_paths()
+        for pid in current:
+            path = paths.get(pid)
+            if path is None:
+                continue
+            if os.path.normcase(str(path)) != expected:
+                raise RuntimeFailure(
+                    f"Codex process identity changed before close confirmation could be applied: {pid}"
+                )
+            attempted.append(pid)
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                check=False,
+            )
+        time.sleep(0.2)
+    remaining = running_pids(executable)
+    raise RuntimeFailure(
+        "the user-confirmed Codex process group did not close: "
+        + ", ".join(str(pid) for pid in remaining)
+    )
+
+
 def _package_asset(root: Path, value: object, field: str) -> Path:
     relative, error = safe_relative_path(value, field)
     if error or relative is None:
@@ -496,6 +550,126 @@ def _read_active(data_dir: Path) -> dict[str, Any] | None:
     if not isinstance(value, dict) or value.get("schemaVersion") != 1:
         raise RuntimeFailure("active runtime state is invalid")
     return value
+
+
+def _read_preference(data_dir: Path) -> dict[str, Any] | None:
+    path = data_dir / PREFERENCE_FILE
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeFailure(f"preferred skin state cannot be read: {exc}") from exc
+    if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+        raise RuntimeFailure("preferred skin state is invalid")
+    required = {
+        "package",
+        "packageId",
+        "manifestHash",
+        "cssHash",
+        "executable",
+        "executableHash",
+        "appVersion",
+        "adapterId",
+        "adapterFile",
+        "adapterFileHash",
+    }
+    missing = sorted(
+        key for key in required if not isinstance(value.get(key), str) or not value[key]
+    )
+    if missing:
+        raise RuntimeFailure(
+            "preferred skin state is missing required string fields: " + ", ".join(missing)
+        )
+    return value
+
+
+def remember_preference(data_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    preference = {
+        "schemaVersion": 1,
+        "runtimeVersion": RUNTIME_VERSION,
+        "configuredAt": utc_now(),
+        "package": state["package"],
+        "packageId": state["packageId"],
+        "manifestHash": state["manifestHash"],
+        "cssHash": state["cssHash"],
+        "executable": state["executable"],
+        "executableHash": state["executableHash"],
+        "appVersion": state["appVersion"],
+        "adapterId": state["adapterId"],
+        "adapterFile": state["adapterFile"],
+        "adapterFileHash": state["adapterFileHash"],
+        "applicationFilesModified": False,
+        "codexConfigModified": False,
+    }
+    atomic_json(data_dir / PREFERENCE_FILE, preference)
+    return preference
+
+
+def refresh_preference_for_runtime_update(
+    data_dir: Path,
+    adapters: Path = DEFAULT_ADAPTERS,
+    *,
+    acknowledged: bool,
+) -> dict[str, Any]:
+    if not acknowledged:
+        raise RuntimeFailure(
+            "refreshing a saved skin for a runtime update requires explicit acknowledgment"
+        )
+    status = runtime_status(data_dir)
+    if status.get("status") == "active":
+        raise RuntimeFailure(
+            "an active healthy runtime already owns the selected skin; restore it before refreshing"
+        )
+    preference = _read_preference(data_dir)
+    if preference is None:
+        raise RuntimeFailure("no preferred skin exists to refresh")
+    preflight = build_preflight(
+        Path(preference["package"]),
+        Path(preference["executable"]),
+        adapters.expanduser().resolve(),
+    )
+    immutable_fields = (
+        "packageId",
+        "manifestHash",
+        "executableHash",
+        "appVersion",
+        "adapterId",
+        "adapterFileHash",
+    )
+    changed = sorted(
+        field for field in immutable_fields if preflight.get(field) != preference.get(field)
+    )
+    if changed:
+        raise RuntimeFailure(
+            "saved skin identity changed; run a new reviewed activation instead: "
+            + ", ".join(changed)
+        )
+    previous_css_hash = preference["cssHash"]
+    refreshed = remember_preference(data_dir, preflight)
+    result = {
+        "ok": True,
+        "status": "refreshed" if refreshed["cssHash"] != previous_css_hash else "unchanged",
+        "packageId": refreshed["packageId"],
+        "appVersion": refreshed["appVersion"],
+        "previousRuntimeVersion": preference.get("runtimeVersion"),
+        "runtimeVersion": refreshed["runtimeVersion"],
+        "previousCssHash": previous_css_hash,
+        "cssHash": refreshed["cssHash"],
+        "immutableContinuity": {field: True for field in immutable_fields},
+    }
+    _append_history(
+        data_dir,
+        {
+            "time": utc_now(),
+            "event": "preferred-skin-runtime-refreshed",
+            "packageId": refreshed["packageId"],
+            "previousRuntimeVersion": preference.get("runtimeVersion"),
+            "runtimeVersion": refreshed["runtimeVersion"],
+            "cssHashChanged": refreshed["cssHash"] != previous_css_hash,
+        },
+    )
+    return result
 
 
 def _append_history(data_dir: Path, event: dict[str, Any]) -> None:
@@ -877,6 +1051,8 @@ def activate_runtime(
             time.sleep(0.25)
             if monitor.poll() is not None:
                 raise RuntimeFailure("background runtime monitor exited during startup")
+            preference = remember_preference(data_dir, state)
+            atomic_json(Path(backup["backupDir"]) / PREFERENCE_FILE, preference)
         except Exception as exc:
             if monitor is not None and monitor.poll() is None:
                 with contextlib.suppress(Exception):
@@ -1166,6 +1342,86 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
     }
 
 
+def resume_runtime(
+    data_dir: Path,
+    adapters: Path = DEFAULT_ADAPTERS,
+    *,
+    acknowledged: bool,
+    wait_seconds: float = 30.0,
+) -> dict[str, Any]:
+    if not acknowledged:
+        raise RuntimeFailure(
+            "resume requires --acknowledge-experimental-runtime because Codex has no official skin API"
+        )
+    preference = _read_preference(data_dir)
+    if preference is None:
+        raise RuntimeFailure(
+            "no preferred skin is saved; activate a validated package once before using resume"
+        )
+
+    status = runtime_status(data_dir)
+    previous_status = str(status["status"])
+    active = _read_active(data_dir)
+    if status.get("ok") and active is not None:
+        same_package = os.path.normcase(str(Path(str(active.get("package"))).resolve())) == os.path.normcase(
+            str(Path(preference["package"]).resolve())
+        )
+        same_executable = os.path.normcase(
+            str(Path(str(active.get("executable"))).resolve())
+        ) == os.path.normcase(str(Path(preference["executable"]).resolve()))
+        if same_package and same_executable:
+            return {
+                **status,
+                "status": "already-active",
+                "resumed": False,
+                "preferredPackageId": preference["packageId"],
+            }
+        raise RuntimeFailure(
+            "a different healthy ChromaPaw runtime session is active; restore it before resuming the preferred skin"
+        )
+
+    restored = None
+    if active is not None:
+        restored = restore_runtime(data_dir, operation="restore")
+
+    executable = Path(preference["executable"]).expanduser().resolve()
+    package = Path(preference["package"]).expanduser().resolve()
+    adapters = adapters.expanduser().resolve()
+    preflight = build_preflight(package, executable, adapters)
+    continuity = {
+        "executableHash": preflight["executableHash"] == preference["executableHash"],
+        "manifestHash": preflight["manifestHash"] == preference["manifestHash"],
+        "cssHash": preflight["cssHash"] == preference["cssHash"],
+        "adapterFileHash": preflight["adapterFileHash"] == preference["adapterFileHash"],
+        "adapterId": preflight["adapterId"] == preference["adapterId"],
+        "appVersion": preflight["appVersion"] == preference["appVersion"],
+    }
+    changed = sorted(key for key, matches in continuity.items() if not matches)
+    if changed:
+        raise RuntimeFailure(
+            "preferred skin continuity check failed; activate again after reviewing changes: "
+            + ", ".join(changed)
+        )
+
+    state = activate_runtime(
+        package,
+        executable,
+        data_dir,
+        adapters,
+        acknowledged=True,
+        profile_dir=None,
+        allow_parallel_profile=False,
+        wait_seconds=wait_seconds,
+    )
+    return {
+        **state,
+        "resumed": True,
+        "previousStatus": previous_status,
+        "staleSessionRecovered": restored is not None,
+        "continuity": continuity,
+    }
+
+
 def capture_runtime_screenshot(data_dir: Path, output: Path, acknowledged: bool) -> dict[str, Any]:
     if not acknowledged:
         raise RuntimeFailure(
@@ -1241,6 +1497,18 @@ def main() -> int:
     verify_parser = subparsers.add_parser("verify", help="Verify or repair active targets")
     verify_parser.add_argument("--repair", action="store_true")
 
+    resume_parser = subparsers.add_parser(
+        "resume", help="Relaunch Codex with the last successfully activated skin"
+    )
+    resume_parser.add_argument("--wait-seconds", type=float, default=30.0)
+    resume_parser.add_argument("--acknowledge-experimental-runtime", action="store_true")
+
+    refresh_parser = subparsers.add_parser(
+        "refresh-preference",
+        help="Refresh the saved CSS identity after a reviewed runtime-only update",
+    )
+    refresh_parser.add_argument("--acknowledge-runtime-update", action="store_true")
+
     subparsers.add_parser("status", help="Inspect active runtime state")
     subparsers.add_parser("stop", help="Remove CSS, stop launched Codex, and close CDP")
     subparsers.add_parser("restore", help="Restore the pre-activation state and close CDP")
@@ -1276,6 +1544,19 @@ def main() -> int:
             )
         elif args.command == "verify":
             result = verify_runtime(data_dir, repair=args.repair)
+        elif args.command == "resume":
+            result = resume_runtime(
+                data_dir,
+                adapters,
+                acknowledged=args.acknowledge_experimental_runtime,
+                wait_seconds=args.wait_seconds,
+            )
+        elif args.command == "refresh-preference":
+            result = refresh_preference_for_runtime_update(
+                data_dir,
+                adapters,
+                acknowledged=args.acknowledge_runtime_update,
+            )
         elif args.command == "status":
             result = runtime_status(data_dir)
         elif args.command == "stop":

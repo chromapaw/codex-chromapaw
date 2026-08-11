@@ -1,6 +1,6 @@
 # macOS compatibility probe
 
-ChromaPaw 0.4.1 can generate portable pet and skin assets with platform-neutral Python workflows. Live macOS skin activation is not implemented or claimed.
+ChromaPaw 0.4.5 can generate portable pet and contrast-safe skin assets with platform-neutral Python workflows. The separate persistent launchers are Windows-only; live macOS skin activation is not implemented or claimed.
 
 The probe exists to gather the exact evidence needed for a safe macOS runtime adapter. It reads an app bundle's `Info.plist`, locates and hashes its declared executable, records Electron packaging signals, and validates a selected ChromaPaw skin package. It does not launch Codex, inject CSS, open a debugging port, edit the app bundle, or create an activation state.
 

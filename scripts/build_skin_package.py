@@ -29,7 +29,7 @@ except ImportError:
     from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
 
-GENERATOR_VERSION = "0.4.1"
+GENERATOR_VERSION = "0.4.2"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 
@@ -48,6 +48,76 @@ def _saturate(rgb: tuple[int, int, int], minimum: float, value: float) -> tuple[
     hue, saturation, _ = colorsys.rgb_to_hsv(*(channel / 255 for channel in rgb))
     converted = colorsys.hsv_to_rgb(hue, max(saturation, minimum), value)
     return tuple(round(channel * 255) for channel in converted)
+
+
+def _rgb_tuple(value: str) -> tuple[int, int, int]:
+    return tuple(int(value[index : index + 2], 16) for index in (1, 3, 5))
+
+
+def _accessible_blend(
+    foreground: tuple[int, int, int],
+    background: tuple[int, int, int],
+    amount: float,
+    minimum: float,
+) -> tuple[int, int, int]:
+    """Mute text toward its surface without dropping below the contrast gate."""
+    for step in range(round(amount * 100), -1, -1):
+        candidate = _blend(foreground, background, step / 100)
+        if contrast_ratio(_hex(candidate), _hex(background)) >= minimum:
+            return candidate
+    return foreground
+
+
+def _ensure_contrast(
+    foreground: tuple[int, int, int],
+    background: tuple[int, int, int],
+    minimum: float,
+) -> tuple[int, int, int]:
+    if contrast_ratio(_hex(foreground), _hex(background)) >= minimum:
+        return foreground
+    black = (0, 0, 0)
+    white = (255, 255, 255)
+    toward = (
+        white
+        if contrast_ratio(_hex(white), _hex(background))
+        >= contrast_ratio(_hex(black), _hex(background))
+        else black
+    )
+    for step in range(1, 101):
+        candidate = _blend(foreground, toward, step / 100)
+        if contrast_ratio(_hex(candidate), _hex(background)) >= minimum:
+            return candidate
+    return toward
+
+
+def semantic_ui_palette(palette: dict[str, Any], mode: str) -> dict[str, str]:
+    """Derive accessible Codex semantic UI roles from an extracted image palette."""
+    surface = _rgb_tuple(str(palette["surface"]))
+    ink = _rgb_tuple(str(palette["ink"]))
+    accent = _rgb_tuple(str(palette["accent"]))
+    secondary = _accessible_blend(ink, surface, 0.24, 4.5)
+    muted = _accessible_blend(ink, surface, 0.38, 4.5)
+    accent_text = _ensure_contrast(accent, surface, 4.5)
+    on_accent = max(
+        ((0, 0, 0), (255, 255, 255)),
+        key=lambda candidate: contrast_ratio(_hex(candidate), _hex(accent_text)),
+    )
+    if mode == "dark":
+        elevated = _blend(surface, (255, 255, 255), 0.08)
+        input_surface = _blend(surface, (255, 255, 255), 0.12)
+    else:
+        elevated = _blend(surface, (0, 0, 0), 0.03)
+        input_surface = _blend(surface, (255, 255, 255), 0.34)
+    return {
+        "primaryText": _hex(ink),
+        "secondaryText": _hex(secondary),
+        "mutedText": _hex(muted),
+        "accentText": _hex(accent_text),
+        "onAccent": _hex(on_accent),
+        "surface": _hex(surface),
+        "elevatedSurface": _hex(elevated),
+        "inputSurface": _hex(input_surface),
+    }
 
 
 def extract_palette(image: Image.Image) -> dict[str, Any]:
@@ -105,10 +175,11 @@ def _rgb(value: str) -> str:
     return " ".join(str(int(value[index : index + 2], 16)) for index in (1, 3, 5))
 
 
-def _variable_block(palette: dict[str, Any], selector: str) -> str:
+def _variable_block(palette: dict[str, Any], selector: str, mode: str) -> str:
     surface = palette["surface"]
     ink = palette["ink"]
     accent = palette["accent"]
+    ui = semantic_ui_palette(palette, mode)
     opacity = palette["panelOpacity"]
     scene_tint = 0.46 if sum(int(surface[index : index + 2], 16) for index in (1, 3, 5)) < 384 else 0.03
     return f"""{selector} {{
@@ -118,6 +189,16 @@ def _variable_block(palette: dict[str, Any], selector: str) -> str:
   --chromapaw-ink-rgb: {_rgb(ink)};
   --chromapaw-accent: {accent};
   --chromapaw-accent-rgb: {_rgb(accent)};
+  --chromapaw-accent-readable: {ui['accentText']};
+  --chromapaw-accent-readable-rgb: {_rgb(ui['accentText'])};
+  --chromapaw-ink-secondary: {ui['secondaryText']};
+  --chromapaw-ink-muted: {ui['mutedText']};
+  --chromapaw-on-accent: {ui['onAccent']};
+  --chromapaw-surface-elevated: {ui['elevatedSurface']};
+  --chromapaw-surface-elevated-rgb: {_rgb(ui['elevatedSurface'])};
+  --chromapaw-surface-input: {ui['inputSurface']};
+  --chromapaw-surface-input-rgb: {_rgb(ui['inputSurface'])};
+  --chromapaw-color-scheme: {mode};
   --chromapaw-panel-opacity: {opacity};
   --chromapaw-scene-tint: {scene_tint};
 }}"""
@@ -126,17 +207,165 @@ def _variable_block(palette: dict[str, Any], selector: str) -> str:
 def build_css(palettes: dict[str, Any], mode: str) -> str:
     blocks = []
     if mode == "adaptive":
-        blocks.append(_variable_block(palettes["light"], ":root, html.electron-light"))
-        blocks.append(_variable_block(palettes["dark"], "html.electron-dark"))
+        blocks.append(_variable_block(palettes["light"], ":root, html.electron-light", "light"))
+        blocks.append(_variable_block(palettes["dark"], "html.electron-dark", "dark"))
         blocks.append(
             "@media (prefers-color-scheme: dark) {\n"
-            + _variable_block(palettes["dark"], ":root:not(.electron-light)")
+            + _variable_block(palettes["dark"], ":root:not(.electron-light)", "dark")
             + "\n}"
         )
     else:
-        blocks.append(_variable_block(palettes[mode], ":root, html"))
+        blocks.append(_variable_block(palettes[mode], ":root, html", mode))
 
     common = r"""
+
+/*
+ * Codex can remain electron-light while a dark image skin is active (or the
+ * reverse). Override semantic UI tokens from the generated image palette so
+ * menus, navigation, editors, inputs, icons, and muted text follow the skin
+ * instead of inheriting an unreadable host color mode.
+ */
+:root,
+html {
+  color-scheme: var(--chromapaw-color-scheme) !important;
+  --codex-base-ink: var(--chromapaw-ink) !important;
+  --color-text-foreground: var(--chromapaw-ink) !important;
+  --color-text-foreground-secondary: var(--chromapaw-ink-secondary) !important;
+  --color-text-foreground-tertiary: var(--chromapaw-ink-muted) !important;
+  --color-text-button-primary: var(--chromapaw-on-accent) !important;
+  --color-text-button-secondary: var(--chromapaw-ink) !important;
+  --color-text-button-tertiary: var(--chromapaw-ink-muted) !important;
+  --color-text-accent: var(--chromapaw-accent-readable) !important;
+  --color-text-on-accent: var(--chromapaw-on-accent) !important;
+  --color-icon-primary: var(--chromapaw-ink) !important;
+  --color-icon-secondary: var(--chromapaw-ink-secondary) !important;
+  --color-icon-tertiary: var(--chromapaw-ink-muted) !important;
+  --color-icon-accent: var(--chromapaw-accent-readable) !important;
+  --color-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --color-border-light: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --color-border-heavy: rgb(var(--chromapaw-ink-rgb) / 0.28) !important;
+  --color-border-focus: var(--chromapaw-accent-readable) !important;
+  --color-background-panel: var(--chromapaw-surface) !important;
+  --color-background-surface: rgb(var(--chromapaw-surface-rgb) / 0.78) !important;
+  --color-background-control: rgb(var(--chromapaw-surface-input-rgb) / 0.94) !important;
+  --color-background-control-opaque: var(--chromapaw-surface-input) !important;
+  --color-background-elevated-primary: rgb(var(--chromapaw-surface-elevated-rgb) / 0.92) !important;
+  --color-background-elevated-primary-opaque: var(--chromapaw-surface-elevated) !important;
+  --color-background-elevated-secondary: rgb(var(--chromapaw-surface-rgb) / 0.86) !important;
+  --color-background-elevated-secondary-opaque: var(--chromapaw-surface) !important;
+  --color-surface: rgb(var(--chromapaw-surface-rgb) / 0.82) !important;
+  --color-surface-elevated: rgb(var(--chromapaw-surface-elevated-rgb) / 0.94) !important;
+  --color-surface-tertiary: rgb(var(--chromapaw-surface-input-rgb) / 0.82) !important;
+  --color-background-button-primary: var(--chromapaw-accent-readable) !important;
+  --color-background-button-primary-hover: rgb(var(--chromapaw-accent-readable-rgb) / 0.88) !important;
+  --color-background-button-primary-active: rgb(var(--chromapaw-accent-readable-rgb) / 0.72) !important;
+  --color-background-button-secondary: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+  --color-background-button-secondary-hover: rgb(var(--chromapaw-ink-rgb) / 0.16) !important;
+  --color-background-button-secondary-active: rgb(var(--chromapaw-ink-rgb) / 0.22) !important;
+  --color-background-button-tertiary-hover: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+
+  --color-token-foreground: var(--chromapaw-ink) !important;
+  --color-token-icon-foreground: var(--chromapaw-ink) !important;
+  --color-token-description-foreground: var(--chromapaw-ink-muted) !important;
+  --color-token-disabled-foreground: var(--chromapaw-ink-muted) !important;
+  --color-token-text-primary: var(--chromapaw-ink) !important;
+  --color-token-text-secondary: var(--chromapaw-ink-secondary) !important;
+  --color-token-text-tertiary: var(--chromapaw-ink-muted) !important;
+  --color-token-text-link-foreground: var(--chromapaw-accent-readable) !important;
+  --color-token-text-link-active-foreground: var(--chromapaw-accent-readable) !important;
+  --color-token-text-preformat-foreground: var(--chromapaw-ink) !important;
+  --color-token-text-preformat-background: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+  --color-token-text-code-block-background: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+  --color-token-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --color-token-border-default: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --color-token-border-light: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --color-token-border-heavy: rgb(var(--chromapaw-ink-rgb) / 0.28) !important;
+  --color-token-focus-border: var(--chromapaw-accent-readable) !important;
+  --color-token-button-background: var(--chromapaw-accent-readable) !important;
+  --color-token-button-foreground: var(--chromapaw-on-accent) !important;
+  --color-token-button-border: rgb(var(--chromapaw-accent-readable-rgb) / 0.52) !important;
+  --color-token-button-secondary-hover-background: rgb(var(--chromapaw-ink-rgb) / 0.14) !important;
+  --color-token-badge-background: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --color-token-badge-foreground: var(--chromapaw-ink-secondary) !important;
+  --color-token-activity-bar-badge-background: var(--chromapaw-accent-readable) !important;
+  --color-token-activity-bar-badge-foreground: var(--chromapaw-on-accent) !important;
+  --color-token-main-surface-primary: rgb(var(--chromapaw-surface-rgb) / 0.72) !important;
+  --color-token-side-bar-background: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-panel-opacity)) !important;
+  --color-token-dropdown-background: var(--chromapaw-surface-elevated) !important;
+  --color-token-dropdown-foreground: var(--chromapaw-ink) !important;
+  --color-token-menu-background: rgb(var(--chromapaw-surface-elevated-rgb) / 0.96) !important;
+  --color-token-menu-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --color-token-menubar-selection-background: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --color-token-menubar-selection-foreground: var(--chromapaw-ink) !important;
+  --color-token-input-background: rgb(var(--chromapaw-surface-input-rgb) / 0.94) !important;
+  --color-token-input-foreground: var(--chromapaw-ink) !important;
+  --color-token-input-placeholder-foreground: var(--chromapaw-ink-muted) !important;
+  --color-token-input-border: rgb(var(--chromapaw-ink-rgb) / 0.24) !important;
+  --color-token-checkbox-background: var(--chromapaw-surface-input) !important;
+  --color-token-checkbox-foreground: var(--chromapaw-ink) !important;
+  --color-token-checkbox-border: rgb(var(--chromapaw-ink-rgb) / 0.24) !important;
+  --color-token-list-active-selection-background: rgb(var(--chromapaw-accent-readable-rgb) / 0.18) !important;
+  --color-token-list-active-selection-foreground: var(--chromapaw-ink) !important;
+  --color-token-list-active-selection-icon-foreground: var(--chromapaw-ink) !important;
+  --color-token-list-hover-background: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --color-token-editor-background: rgb(var(--chromapaw-surface-rgb) / 0.86) !important;
+  --color-token-editor-foreground: var(--chromapaw-ink) !important;
+  --color-token-editor-widget-background: var(--chromapaw-surface-elevated) !important;
+  --color-token-terminal-background: rgb(var(--chromapaw-surface-rgb) / 0.90) !important;
+  --color-token-terminal-foreground: var(--chromapaw-ink) !important;
+  --color-token-terminal-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --color-token-toolbar-hover-background: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+
+  --vscode-foreground: var(--chromapaw-ink) !important;
+  --vscode-descriptionForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-disabledForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-titleBar-activeBackground: rgb(var(--chromapaw-surface-rgb) / 0.88) !important;
+  --vscode-titleBar-activeForeground: var(--chromapaw-ink) !important;
+  --vscode-titleBar-inactiveBackground: rgb(var(--chromapaw-surface-rgb) / 0.78) !important;
+  --vscode-titleBar-inactiveForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-titleBar-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --vscode-menubar-selectionBackground: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --vscode-menubar-selectionForeground: var(--chromapaw-ink) !important;
+  --vscode-menu-background: rgb(var(--chromapaw-surface-elevated-rgb) / 0.96) !important;
+  --vscode-menu-foreground: var(--chromapaw-ink) !important;
+  --vscode-menu-selectionBackground: rgb(var(--chromapaw-accent-readable-rgb) / 0.20) !important;
+  --vscode-menu-selectionForeground: var(--chromapaw-ink) !important;
+  --vscode-menu-border: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  --vscode-commandCenter-background: rgb(var(--chromapaw-surface-elevated-rgb) / 0.92) !important;
+  --vscode-commandCenter-foreground: var(--chromapaw-ink) !important;
+  --vscode-commandCenter-activeForeground: var(--chromapaw-ink) !important;
+  --vscode-commandCenter-inactiveForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-activityBar-background: rgb(var(--chromapaw-surface-rgb) / 0.82) !important;
+  --vscode-activityBar-foreground: var(--chromapaw-ink) !important;
+  --vscode-activityBar-inactiveForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-sideBar-background: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-panel-opacity)) !important;
+  --vscode-sideBar-foreground: var(--chromapaw-ink) !important;
+  --vscode-sideBarTitle-foreground: var(--chromapaw-ink) !important;
+  --vscode-sideBarSectionHeader-foreground: var(--chromapaw-ink-secondary) !important;
+  --vscode-statusBar-background: rgb(var(--chromapaw-surface-rgb) / 0.82) !important;
+  --vscode-statusBar-foreground: var(--chromapaw-ink) !important;
+  --vscode-statusBar-noFolderBackground: rgb(var(--chromapaw-surface-rgb) / 0.82) !important;
+  --vscode-statusBar-noFolderForeground: var(--chromapaw-ink) !important;
+  --vscode-editor-background: rgb(var(--chromapaw-surface-rgb) / 0.86) !important;
+  --vscode-editor-foreground: var(--chromapaw-ink) !important;
+  --vscode-editor-placeholder-foreground: var(--chromapaw-ink-muted) !important;
+  --vscode-input-background: rgb(var(--chromapaw-surface-input-rgb) / 0.94) !important;
+  --vscode-input-foreground: var(--chromapaw-ink) !important;
+  --vscode-input-placeholderForeground: var(--chromapaw-ink-muted) !important;
+  --vscode-input-border: rgb(var(--chromapaw-ink-rgb) / 0.24) !important;
+  --vscode-list-activeSelectionBackground: rgb(var(--chromapaw-accent-readable-rgb) / 0.18) !important;
+  --vscode-list-activeSelectionForeground: var(--chromapaw-ink) !important;
+  --vscode-list-hoverBackground: rgb(var(--chromapaw-ink-rgb) / 0.12) !important;
+  --vscode-list-inactiveSelectionBackground: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+  --vscode-breadcrumb-background: rgb(var(--chromapaw-surface-rgb) / 0.82) !important;
+  --vscode-breadcrumb-foreground: var(--chromapaw-ink-muted) !important;
+  --vscode-breadcrumb-focusForeground: var(--chromapaw-ink-secondary) !important;
+  --vscode-breadcrumb-activeSelectionForeground: var(--chromapaw-ink) !important;
+  --vscode-terminal-background: rgb(var(--chromapaw-surface-rgb) / 0.90) !important;
+  --vscode-terminal-foreground: var(--chromapaw-ink) !important;
+  --vscode-terminal-ansiWhite: var(--chromapaw-ink) !important;
+  --vscode-terminal-ansiBrightWhite: var(--chromapaw-ink) !important;
+}
 
 html,
 body,
@@ -231,6 +460,14 @@ main.main-surface {
   backdrop-filter: blur(18px) saturate(112%);
 }
 
+.app-shell-left-panel [data-thread-title] {
+  color: var(--chromapaw-ink) !important;
+}
+
+.app-shell-left-panel .sidebar-foreground-muted {
+  color: var(--chromapaw-ink-secondary) !important;
+}
+
 [data-slot="dialog-content"],
 [role="dialog"] {
   background: rgb(var(--chromapaw-surface-rgb) / 0.92) !important;
@@ -264,7 +501,13 @@ main.main-surface {
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     names = [
+        "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+        if bold
+        else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         if bold
         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -294,8 +537,10 @@ def render_preview(
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     surface = tuple(int(palette["surface"][i : i + 2], 16) for i in (1, 3, 5))
-    ink = tuple(int(palette["ink"][i : i + 2], 16) for i in (1, 3, 5))
-    accent = tuple(int(palette["accent"][i : i + 2], 16) for i in (1, 3, 5))
+    ui = semantic_ui_palette(palette, mode)
+    ink = _rgb_tuple(ui["primaryText"])
+    muted_ink = _rgb_tuple(ui["mutedText"])
+    accent = _rgb_tuple(ui["accentText"])
     panel_alpha = round(float(palette["panelOpacity"]) * 255)
     shadow = (0, 0, 0, 34 if mode == "light" else 72)
 
@@ -321,10 +566,15 @@ def render_preview(
         y = nav_y + index * 42
         nav_ink = ink
         if index == 1:
+            active_fill = (
+                accent + (220,)
+                if mode == "dark"
+                else _blend(surface, accent, 0.16) + (245,)
+            )
             draw.rounded_rectangle(
                 (margin - 7, y - 8, sidebar - margin, y + 25),
                 radius=10,
-                fill=accent + (220 if mode == "dark" else 34,),
+                fill=active_fill,
             )
             if mode == "dark":
                 nav_ink = surface
@@ -335,8 +585,22 @@ def render_preview(
     main_right = width - round(width * 0.06)
     content_width = main_right - main_left
     draw.text((main_left, top + 3), "SKIN STUDIO  /  PREVIEW", font=small_font, fill=accent + (245,))
+    title_position = (main_left, top + 31)
+    title_box = draw.textbbox(title_position, display_name, font=title_font)
+    draw.rounded_rectangle(
+        (
+            main_left - 9,
+            top + 23,
+            min(main_right, title_box[2] + 12),
+            title_box[3] + 8,
+        ),
+        radius=10,
+        fill=surface + (218 if mode == "light" else 118,),
+        outline=accent + (34,),
+        width=1,
+    )
     draw.text(
-        (main_left, top + 31),
+        title_position,
         display_name,
         font=title_font,
         fill=ink + (250,),
@@ -376,7 +640,11 @@ def render_preview(
     badge_text = f"{mode.upper()}  •  WCAG TEXT {contrast_ratio(palette['surface'], palette['ink']):.1f}:1"
     badge_box = draw.textbbox((0, 0), badge_text, font=small_font)
     badge_width = badge_box[2] - badge_box[0] + 24
-    badge_fill = accent + ((224 if mode == "dark" else 36),)
+    badge_fill = (
+        accent + (224,)
+        if mode == "dark"
+        else _blend(surface, accent, 0.16) + (245,)
+    )
     badge_ink = surface if mode == "dark" else ink
     draw.rounded_rectangle(
         (main_left + 24, badge_y, main_left + 24 + badge_width, badge_y + 25),
@@ -402,7 +670,7 @@ def render_preview(
         (main_left + 22, input_top + 20),
         "Ask Codex to refine this skin...",
         font=body_font,
-        fill=ink + (145,),
+        fill=muted_ink + (235,),
     )
     button = 34
     bx = main_right - button - 13
@@ -520,6 +788,22 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
     primary_preview = assets / "preview.png"
     shutil.copy2(output / preview_assets[primary_key], primary_preview)
     active_palette = palettes[primary_mode]
+    ui_palettes = {
+        mode: semantic_ui_palette(palettes[mode], mode) for mode in ("light", "dark")
+    }
+    ui_contrast_checks = []
+    for variant_mode in ("light", "dark"):
+        ui_palette = ui_palettes[variant_mode]
+        for role in ("primaryText", "secondaryText", "mutedText", "accentText"):
+            ratio = contrast_ratio(ui_palette["surface"], ui_palette[role])
+            ui_contrast_checks.append(
+                {
+                    "id": f"{variant_mode}-ui-{role}-contrast",
+                    "status": "pass" if ratio >= 4.5 else "fail",
+                    "value": round(ratio, 2),
+                    "threshold": 4.5,
+                }
+            )
 
     report = {
         "schemaVersion": 1,
@@ -528,6 +812,7 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
         "backgroundDimensions": {"width": artwork.width, "height": artwork.height},
         "dominantPalette": palette_data["dominant"],
         "palettes": palettes,
+        "uiPalettes": ui_palettes,
         "safeContentZone": SAFE_CONTENT_ZONE,
         "checks": [
             {
@@ -563,7 +848,13 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
                 "status": "pass",
                 "value": "present" if request.get("themeProfile") else "legacy-request",
             },
-        ],
+            {
+                "id": "semantic-ui-token-overrides",
+                "status": "pass",
+                "value": "codex-and-vscode-token-families",
+            },
+        ]
+        + ui_contrast_checks,
         "activation": {
             "status": "not-attempted",
             "reason": "Portable package generation is separate from runtime compatibility and activation.",

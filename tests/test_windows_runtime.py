@@ -25,11 +25,15 @@ from cdp_client import CdpEndpoint, CdpError, inject_css, remove_css, verify_css
 from windows_runtime import (  # noqa: E402
     RuntimeFailure,
     activate_runtime,
+    close_matching_codex_processes,
     compile_skin,
     detect_app_version,
     load_adapters,
     monitor_runtime,
     redact_result,
+    refresh_preference_for_runtime_update,
+    remember_preference,
+    resume_runtime,
     restore_allowlisted_config,
     select_adapter,
 )
@@ -220,6 +224,207 @@ class FakeCdpServer(socketserver.ThreadingTCPServer):
 
 
 class WindowsRuntimeTests(unittest.TestCase):
+    def test_close_matching_codex_requires_explicit_confirmation(self) -> None:
+        with self.assertRaises(RuntimeFailure) as context:
+            close_matching_codex_processes(
+                Path("C:/fixture/app-26.707.9981.0/ChatGPT.exe"),
+                acknowledged=False,
+            )
+        self.assertIn("explicit user confirmation", str(context.exception))
+
+    @unittest.skipUnless(os.name == "nt", "Windows process close behavior")
+    def test_close_matching_codex_rechecks_exact_process_identity(self) -> None:
+        executable = Path("C:/fixture/app-26.707.9981.0/ChatGPT.exe").resolve()
+        with mock.patch(
+            "windows_runtime.running_pids",
+            side_effect=[[101, 102], [101, 102], []],
+        ), mock.patch(
+            "windows_runtime._windows_process_paths",
+            return_value={101: executable, 102: executable},
+        ), mock.patch("windows_runtime.subprocess.run") as taskkill:
+            result = close_matching_codex_processes(
+                executable,
+                acknowledged=True,
+                timeout=1.0,
+            )
+        self.assertTrue(result["closed"])
+        self.assertEqual(result["pids"], [101, 102])
+        self.assertEqual(taskkill.call_count, 2)
+
+    def test_remember_preference_persists_only_restart_safe_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            state = {
+                "package": str(data_dir / "skin"),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(data_dir / "app-26.707.9981.0" / "ChatGPT.exe"),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "chatgpt-electron-26-707-9981",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+                "sessionToken": "must-not-persist",
+                "port": 12345,
+            }
+            preference = remember_preference(data_dir, state)
+            saved = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved, preference)
+            self.assertNotIn("sessionToken", saved)
+            self.assertNotIn("port", saved)
+            self.assertFalse(saved["applicationFilesModified"])
+
+    def test_resume_requires_explicit_runtime_acknowledgement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(RuntimeFailure) as context:
+                resume_runtime(Path(temporary), acknowledged=False)
+            self.assertIn("acknowledge-experimental-runtime", str(context.exception))
+
+    def test_refresh_preference_allows_only_runtime_css_identity_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            state = {
+                "package": str(data_dir / "skin"),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(data_dir / "app-26.707.9981.0" / "ChatGPT.exe"),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+            }
+            remember_preference(data_dir, state)
+            preflight = {**state, "cssHash": "e" * 64}
+            with mock.patch(
+                "windows_runtime.runtime_status", return_value={"ok": True, "status": "inactive"}
+            ), mock.patch("windows_runtime.build_preflight", return_value=preflight):
+                result = refresh_preference_for_runtime_update(
+                    data_dir,
+                    ROOT / "runtime" / "windows-adapters.json",
+                    acknowledged=True,
+                )
+            self.assertEqual(result["status"], "refreshed")
+            self.assertEqual(result["cssHash"], "e" * 64)
+            saved = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["cssHash"], "e" * 64)
+
+    def test_refresh_preference_rejects_package_identity_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            state = {
+                "package": str(data_dir / "skin"),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(data_dir / "app-26.707.9981.0" / "ChatGPT.exe"),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+            }
+            remember_preference(data_dir, state)
+            preflight = {**state, "manifestHash": "f" * 64, "cssHash": "e" * 64}
+            with mock.patch(
+                "windows_runtime.runtime_status", return_value={"ok": True, "status": "inactive"}
+            ), mock.patch("windows_runtime.build_preflight", return_value=preflight):
+                with self.assertRaises(RuntimeFailure) as context:
+                    refresh_preference_for_runtime_update(
+                        data_dir,
+                        ROOT / "runtime" / "windows-adapters.json",
+                        acknowledged=True,
+                    )
+            self.assertIn("manifestHash", str(context.exception))
+            saved = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["cssHash"], "b" * 64)
+
+    def test_resume_returns_without_relaunch_for_matching_healthy_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            package = data_dir / "skin"
+            executable = data_dir / "app-26.707.9981.0" / "ChatGPT.exe"
+            preference = {
+                "schemaVersion": 1,
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(executable),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+            }
+            (data_dir / "preferred-skin.json").write_text(
+                json.dumps(preference), encoding="utf-8"
+            )
+            active = {
+                "schemaVersion": 1,
+                "package": str(package),
+                "executable": str(executable),
+            }
+            (data_dir / "active.json").write_text(json.dumps(active), encoding="utf-8")
+            healthy = {"ok": True, "status": "active", "packageId": "fixture-skin"}
+            with mock.patch("windows_runtime.runtime_status", return_value=healthy), mock.patch(
+                "windows_runtime.activate_runtime"
+            ) as activate:
+                result = resume_runtime(data_dir, acknowledged=True)
+            self.assertEqual(result["status"], "already-active")
+            self.assertFalse(result["resumed"])
+            activate.assert_not_called()
+
+    def test_resume_recovers_stale_state_and_rechecks_all_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            package = data_dir / "skin"
+            executable = data_dir / "app-26.707.9981.0" / "ChatGPT.exe"
+            adapters = ROOT / "runtime" / "windows-adapters.json"
+            preference = {
+                "schemaVersion": 1,
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(executable),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(adapters),
+                "adapterFileHash": "d" * 64,
+            }
+            (data_dir / "preferred-skin.json").write_text(
+                json.dumps(preference), encoding="utf-8"
+            )
+            (data_dir / "active.json").write_text(
+                json.dumps({"schemaVersion": 1}), encoding="utf-8"
+            )
+            preflight = {
+                "executableHash": preference["executableHash"],
+                "manifestHash": preference["manifestHash"],
+                "cssHash": preference["cssHash"],
+                "adapterFileHash": preference["adapterFileHash"],
+                "adapterId": preference["adapterId"],
+                "appVersion": preference["appVersion"],
+            }
+            activated = {"ok": True, "status": "active", "packageId": "fixture-skin"}
+            with mock.patch(
+                "windows_runtime.runtime_status", return_value={"ok": False, "status": "stale"}
+            ), mock.patch("windows_runtime.restore_runtime", return_value={"status": "restored"}) as restore, mock.patch(
+                "windows_runtime.build_preflight", return_value=preflight
+            ), mock.patch("windows_runtime.activate_runtime", return_value=activated) as activate:
+                result = resume_runtime(
+                    data_dir, adapters, acknowledged=True, wait_seconds=4.0
+                )
+            restore.assert_called_once_with(data_dir, operation="restore")
+            activate.assert_called_once()
+            self.assertTrue(result["resumed"])
+            self.assertTrue(result["staleSessionRecovered"])
+            self.assertTrue(all(result["continuity"].values()))
+
     def test_cdp_inject_verify_remove_lifecycle(self) -> None:
         with FakeCdpServer() as server:
             endpoint = CdpEndpoint(server.server_address[1])

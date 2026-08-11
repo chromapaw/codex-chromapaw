@@ -25,10 +25,16 @@ Apply these rules to every state-changing operation.
 10. During restore, stop the monitor first, remove session-owned CSS, verify process identities, terminate only the runtime-launched process tree, and confirm that the port closed.
 11. Restore only allowlisted volatile Codex session keys when all nonvolatile config lines are unchanged. Preserve unrelated user changes.
 12. Treat screenshots as private by default because they may contain task names, source paths, or conversation text.
+13. Persist only restart-safe package, executable, version, CSS, and adapter identities. Never copy session tokens, ports, target metadata, or page content into the relaunch preference.
+14. Resume only after rechecking every persisted identity. Fail closed when the package, executable, app version, compiled CSS, adapter id, or adapter registry changed.
+15. Treat Desktop and Start Menu integration as a separate explicitly acknowledged operation. Verify the existing target, leave the application-managed shortcut untouched, add distinctly named ChromaPaw entries, and install no login task, registry auto-run entry, or always-on watcher.
+16. Hash stable shortcut semantics—target, arguments, working directory, icon, and description—because Windows may rewrite binary tracking metadata after use. Before removal, verify both separately managed entries; if either semantic hash differs from the receipt, remove neither.
 
 ## Failure behavior
 
 - If launch or injection fails, terminate the process launched by the runtime, write a failure record, and leave no active state.
 - If verification fails, report the failed target and use explicit repair only when the package and adapter hashes still match.
 - If restore cannot prove process or style ownership, stop and report the exact mismatch instead of guessing.
+- If resume cannot prove preference continuity, require a fresh preflight and activation instead of updating saved hashes automatically.
+- If semantic ownership of either separate shortcut cannot be proven, leave both it and the original application entry unchanged and report the exact mismatch.
 - If an official packaged executable cannot be launched through the verified path, keep that adapter disabled. Do not weaken Windows package protections.
