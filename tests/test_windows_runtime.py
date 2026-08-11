@@ -508,6 +508,7 @@ class WindowsRuntimeTests(unittest.TestCase):
                 load_adapters(path)
             self.assertIn("duplicate runtime adapter target", str(context.exception))
 
+    @unittest.skipUnless(os.name == "nt", "Windows runtime rollback behavior")
     def test_launch_failure_records_rollback_without_active_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
