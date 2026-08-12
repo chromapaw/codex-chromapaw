@@ -6,6 +6,7 @@ Use this checklist for every public ChromaPaw release. Unit tests establish dete
 
 - Run `python scripts/release_check.py` on Python 3.10 and 3.12.
 - Require GitHub Actions to pass on Windows, macOS, and Linux.
+- Require the enhanced Apple Silicon and Intel macOS harness to publish nonblank main-window and transparent-overlay screenshots plus a passing JSON report.
 - Validate the plugin with Codex's `plugin-creator` validator.
 - Validate all three skills with Codex's `skill-creator` validator.
 - Run `python scripts/audit_pets.py --json --allow-issues` and review every legacy or invalid package.
@@ -26,11 +27,12 @@ Use redistributable or private local references; never commit private source ima
 | Transparent PNG | Flatten safely for skin; isolate pet transparency | Produce no rectangular background |
 | Dark image | Keep menus, navigation, editor, and input text readable | Preserve dark details at pet size |
 | Light image | Keep low-contrast host text from disappearing | Preserve outline readability |
+| Right task/settings panel | Match the generated surface and primary/secondary text roles | No light-on-light or dark-on-dark panel content |
 | Portrait, square, ultrawide | Pass all six preview ratios without critical cropping | Fit every used cell without clipping |
 | Low-resolution image | Disclose likely quality limits | Ask for a clearer reference when identity is ambiguous |
 | Text-heavy or screenshot | Keep text out of generated motifs unless requested | Reject UI/text as detached pet content |
 
-For skins, visually inspect light and dark 16:10 plus 16:9 and 4:3 edge cases. For pets, require the complete hatch-pet contact sheet, motion previews, 16 direction semantics, blind direction result, continuity report, and v2 validation.
+For skins, visually inspect light and dark 16:10 plus 16:9 and 4:3 edge cases. With a pet enabled, also verify the notification card title, body, and controls against both light and dark image-derived surfaces while preserving the transparent pet sprite. For pets, require the complete hatch-pet contact sheet, motion previews, 16 direction semantics, blind direction result, continuity report, and v2 validation.
 
 ## Clean-environment installation
 
@@ -54,11 +56,12 @@ python scripts/smoke_test_install.py --source . --ref= --json
 - Claim Windows activation only for exact adapter versions that passed the live checklist in `CONTRIBUTING.md`.
 - Do not infer official AppX support from a standalone-copy result.
 - Keep macOS activation unsupported until an actual Mac passes the documented adapter acceptance process.
+- Treat the enhanced cloud harness as simulated-renderer evidence, not as proof that the signed Codex application was activated.
 - Keep package generation separate from activation claims on unsupported builds.
 
 ## Publication
 
-- Ensure the worktree is clean and `CHANGELOG.md` matches the manifest version.
+- Ensure the worktree is clean and `CHANGELOG.md` matches the manifest's release version; local `+codex.<cachebuster>` build metadata does not create a separate public release.
 - Tag `v<manifest-version>` only after the candidate commit passes CI.
 - Publish release notes that name exact live-tested Codex versions and all known unsupported routes.
 - Re-run the isolated GitHub installation smoke test against the published tag.

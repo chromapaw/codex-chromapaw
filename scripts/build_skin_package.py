@@ -29,7 +29,7 @@ except ImportError:
     from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
 
-GENERATOR_VERSION = "0.4.2"
+GENERATOR_VERSION = "0.4.6"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 
@@ -108,6 +108,16 @@ def semantic_ui_palette(palette: dict[str, Any], mode: str) -> dict[str, str]:
     else:
         elevated = _blend(surface, (0, 0, 0), 0.03)
         input_surface = _blend(surface, (255, 255, 255), 0.34)
+    notification_text = _ensure_contrast(ink, elevated, 4.5)
+    notification_secondary = _accessible_blend(
+        notification_text, elevated, 0.24, 4.5
+    )
+    notification_control_text = _accessible_blend(
+        notification_text, input_surface, 0.24, 4.5
+    )
+    side_panel_text = _ensure_contrast(ink, surface, 4.5)
+    side_panel_secondary = _accessible_blend(side_panel_text, surface, 0.24, 4.5)
+    side_panel_section_text = _ensure_contrast(side_panel_text, elevated, 4.5)
     return {
         "primaryText": _hex(ink),
         "secondaryText": _hex(secondary),
@@ -117,6 +127,16 @@ def semantic_ui_palette(palette: dict[str, Any], mode: str) -> dict[str, str]:
         "surface": _hex(surface),
         "elevatedSurface": _hex(elevated),
         "inputSurface": _hex(input_surface),
+        "notificationSurface": _hex(elevated),
+        "notificationText": _hex(notification_text),
+        "notificationSecondaryText": _hex(notification_secondary),
+        "notificationControlSurface": _hex(input_surface),
+        "notificationControlText": _hex(notification_control_text),
+        "sidePanelSurface": _hex(surface),
+        "sidePanelText": _hex(side_panel_text),
+        "sidePanelSecondaryText": _hex(side_panel_secondary),
+        "sidePanelSectionSurface": _hex(elevated),
+        "sidePanelSectionText": _hex(side_panel_section_text),
     }
 
 
@@ -181,7 +201,7 @@ def _variable_block(palette: dict[str, Any], selector: str, mode: str) -> str:
     accent = palette["accent"]
     ui = semantic_ui_palette(palette, mode)
     opacity = palette["panelOpacity"]
-    scene_tint = 0.46 if sum(int(surface[index : index + 2], 16) for index in (1, 3, 5)) < 384 else 0.03
+    scene_wash = 0.66
     return f"""{selector} {{
   --chromapaw-surface: {surface};
   --chromapaw-surface-rgb: {_rgb(surface)};
@@ -198,9 +218,19 @@ def _variable_block(palette: dict[str, Any], selector: str, mode: str) -> str:
   --chromapaw-surface-elevated-rgb: {_rgb(ui['elevatedSurface'])};
   --chromapaw-surface-input: {ui['inputSurface']};
   --chromapaw-surface-input-rgb: {_rgb(ui['inputSurface'])};
+  --chromapaw-notification-surface: {ui['notificationSurface']};
+  --chromapaw-notification-text: {ui['notificationText']};
+  --chromapaw-notification-text-secondary: {ui['notificationSecondaryText']};
+  --chromapaw-notification-control-surface: {ui['notificationControlSurface']};
+  --chromapaw-notification-control-text: {ui['notificationControlText']};
+  --chromapaw-side-panel-surface: {ui['sidePanelSurface']};
+  --chromapaw-side-panel-text: {ui['sidePanelText']};
+  --chromapaw-side-panel-text-secondary: {ui['sidePanelSecondaryText']};
+  --chromapaw-side-panel-section-surface: {ui['sidePanelSectionSurface']};
+  --chromapaw-side-panel-section-text: {ui['sidePanelSectionText']};
   --chromapaw-color-scheme: {mode};
   --chromapaw-panel-opacity: {opacity};
-  --chromapaw-scene-tint: {scene_tint};
+  --chromapaw-scene-wash: {scene_wash};
 }}"""
 
 
@@ -397,11 +427,8 @@ body::after {
   inset: 0;
   content: "";
   pointer-events: none;
-  background:
-    linear-gradient(
-      rgb(4 12 16 / var(--chromapaw-scene-tint)),
-      rgb(4 12 16 / var(--chromapaw-scene-tint))
-    ),
+  background-color: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash));
+  background-image:
     linear-gradient(
       90deg,
       rgb(var(--chromapaw-surface-rgb) / 0.22),
@@ -445,11 +472,46 @@ main.main-surface {
 
 [data-avatar-mascot="true"],
 [data-avatar-overlay-hit-region="mascot"],
-.codex-avatar-button,
-.codex-avatar-root {
+.codex-avatar-button {
   background: transparent !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+
+/*
+ * The notification tray lives in the transparent pet window. Codex's material
+ * defaults can be light even when an image-derived dark skin supplies light
+ * foreground tokens, so pair this surface and its text roles explicitly.
+ */
+[data-avatar-overlay-measure="notification-tray-row"]
+  > div:has(> [role="button"]) {
+  background: var(--chromapaw-notification-surface) !important;
+  color: var(--chromapaw-notification-text) !important;
+  border: 1px solid rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.22) !important;
+}
+
+[data-avatar-overlay-measure="notification-tray-row"] [role="button"],
+[data-avatar-overlay-measure="notification-tray-row"]
+  [role="button"]
+  > span:first-child,
+[data-avatar-overlay-measure="notification-tray-row"]
+  [role="button"]
+  > span:first-child
+  * {
+  color: var(--chromapaw-notification-text) !important;
+}
+
+[data-avatar-overlay-measure-body="true"] {
+  color: var(--chromapaw-notification-text-secondary) !important;
+}
+
+[data-avatar-overlay-control="expand"] button,
+[data-avatar-overlay-control="reply"] button,
+[data-avatar-overlay-control="dismiss"] button {
+  background: var(--chromapaw-notification-control-surface) !important;
+  color: var(--chromapaw-notification-control-text) !important;
+  border-color: rgb(var(--chromapaw-ink-rgb) / 0.22) !important;
 }
 
 .app-shell-left-panel {
@@ -466,6 +528,54 @@ main.main-surface {
 
 .app-shell-left-panel .sidebar-foreground-muted {
   color: var(--chromapaw-ink-secondary) !important;
+}
+
+/*
+ * Codex's right-side task/settings panel can establish its own light/dark
+ * token scope. Bind that stable app-shell region directly to the image-derived
+ * skin roles so a local host theme cannot produce a light panel with light
+ * text (or the inverse).
+ */
+[data-app-shell-focus-area="right-panel"] {
+  background: var(--chromapaw-side-panel-surface) !important;
+  color: var(--chromapaw-side-panel-text) !important;
+  --color-token-main-surface-primary: var(--chromapaw-side-panel-surface) !important;
+  --color-token-main-surface-secondary: var(--chromapaw-side-panel-section-surface) !important;
+  --color-token-bg-secondary: var(--chromapaw-side-panel-section-surface) !important;
+  --color-background-panel: var(--chromapaw-side-panel-section-surface) !important;
+  --color-token-foreground: var(--chromapaw-side-panel-text) !important;
+  --color-token-text-primary: var(--chromapaw-side-panel-text) !important;
+  --color-token-text-secondary: var(--chromapaw-side-panel-text-secondary) !important;
+  --color-token-description-foreground: var(--chromapaw-side-panel-text-secondary) !important;
+  border-left-color: rgb(var(--chromapaw-ink-rgb) / 0.18) !important;
+  box-shadow: -14px 0 36px rgb(0 0 0 / 0.12) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(110%);
+  backdrop-filter: blur(18px) saturate(110%);
+}
+
+[data-app-shell-focus-area="right-panel"]
+  [class~="bg-token-main-surface-primary"] {
+  background-color: var(--chromapaw-side-panel-surface) !important;
+}
+
+[data-app-shell-focus-area="right-panel"]
+  [class~="bg-token-bg-secondary"] {
+  background-color: var(--chromapaw-side-panel-section-surface) !important;
+  color: var(--chromapaw-side-panel-section-text) !important;
+}
+
+[data-app-shell-focus-area="right-panel"]
+  :is([class~="text-token-foreground"], [class~="text-token-text-primary"]) {
+  color: var(--chromapaw-side-panel-text) !important;
+}
+
+[data-app-shell-focus-area="right-panel"]
+  :is(
+    [class~="text-token-description-foreground"],
+    [class~="text-token-text-secondary"],
+    [class~="text-token-text-tertiary"]
+  ) {
+  color: var(--chromapaw-side-panel-text-secondary) !important;
 }
 
 [data-slot="dialog-content"],
@@ -794,8 +904,20 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
     ui_contrast_checks = []
     for variant_mode in ("light", "dark"):
         ui_palette = ui_palettes[variant_mode]
-        for role in ("primaryText", "secondaryText", "mutedText", "accentText"):
-            ratio = contrast_ratio(ui_palette["surface"], ui_palette[role])
+        contrast_roles = (
+            ("primaryText", "surface"),
+            ("secondaryText", "surface"),
+            ("mutedText", "surface"),
+            ("accentText", "surface"),
+            ("notificationText", "notificationSurface"),
+            ("notificationSecondaryText", "notificationSurface"),
+            ("notificationControlText", "notificationControlSurface"),
+            ("sidePanelText", "sidePanelSurface"),
+            ("sidePanelSecondaryText", "sidePanelSurface"),
+            ("sidePanelSectionText", "sidePanelSectionSurface"),
+        )
+        for role, surface_role in contrast_roles:
+            ratio = contrast_ratio(ui_palette[surface_role], ui_palette[role])
             ui_contrast_checks.append(
                 {
                     "id": f"{variant_mode}-ui-{role}-contrast",

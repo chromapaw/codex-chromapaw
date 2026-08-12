@@ -12,7 +12,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"], "0.4.5")
+        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.5")
+        self.assertRegex(manifest["version"], r"^0\.4\.5(?:\+codex\.[0-9a-z-]+)?$")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -97,6 +98,27 @@ class PluginStructureTests(unittest.TestCase):
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_macos_enhanced_harness_assets_exist(self) -> None:
+        for relative in (
+            ".github/workflows/macos-enhanced.yml",
+            "package.json",
+            "package-lock.json",
+            "scripts/macos_enhanced_test.py",
+            "scripts/macos_visual_smoke.mjs",
+            "tests/fixtures/macos-harness/host.css",
+            "tests/fixtures/macos-harness/layout.css",
+            "tests/fixtures/macos-harness/index.html",
+            "tests/fixtures/macos-harness/pet-overlay.html",
+        ):
+            self.assertTrue((ROOT / relative).is_file(), relative)
+        workflow = (ROOT / ".github" / "workflows" / "macos-enhanced.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("macos-15-intel", workflow)
+        self.assertIn("os: macos-15", workflow)
+        self.assertIn("scripts/macos_enhanced_test.py", workflow)
+        self.assertIn("actions/upload-artifact", workflow)
 
     def test_release_automation_assets_exist(self) -> None:
         expected = (

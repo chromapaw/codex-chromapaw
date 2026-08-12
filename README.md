@@ -25,7 +25,7 @@ For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing 
 | Pet package validation/install/restore | Implemented | Implementation present; real-Mac validation pending |
 | Live skin activation | Experimental, exact-version adapters only | Not implemented |
 | Skin relaunch after closing Codex | Explicit, reversible ChromaPaw Desktop and Start Menu shortcuts | Not implemented |
-| Compatibility discovery | Implemented | Read-only probe implemented |
+| Compatibility discovery | Implemented | Read-only probe and enhanced cloud harness implemented |
 
 On the current Windows development machine, standalone Codex `26.707.9981.0` has an enabled experimental adapter. The official AppX `26.803.5235.0` is discoverable but activation remains disabled. Unknown versions fail closed.
 
@@ -59,7 +59,7 @@ On the current Windows development machine, standalone Codex `26.707.9981.0` has
 - A successful Windows activation remembers only package/executable/adapter identities and hashes. It never stores the session token or debugging port as a relaunch preference.
 - The optional Windows integration leaves `ChatGPT.lnk` untouched, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
 - `scripts/audit_pets.py` reports valid v2, legacy v1, and invalid installed pets without changing any files.
-- The macOS tool reads bundle metadata and validates a package but cannot activate it.
+- The macOS probe reads bundle metadata and validates a package but cannot activate it. A separate enhanced GitHub Actions harness runs on Apple Silicon and Intel macOS runners, builds a real Skin Studio package, exercises pet installation/replacement/restore in a temporary Codex home, and captures simulated Codex renderer screenshots for the main window, right panel, and transparent pet overlay. It still does not test or claim activation in the signed, logged-in Codex app.
 
 ## Install
 

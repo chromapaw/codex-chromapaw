@@ -46,7 +46,7 @@ The four layers describe spatial depth, not fixed scenery. A motif cannot also b
 - source attribution that does not publish local image paths;
 - structured QA with contrast, ratio coverage, semantic-profile, and pet-overlay-isolation checks.
 
-The generated CSS contains an explicit guard for Codex's transparent avatar overlay. This prevents the skin background from being painted into the pet window as a rectangular block. Semantic text roles are tested independently against their surfaces so a dark upload cannot inherit dark host-theme text, and a light upload cannot inherit low-contrast light text.
+The generated CSS contains an explicit guard for Codex's transparent avatar overlay. This prevents the skin background from being painted into the pet window as a rectangular block while leaving `.codex-avatar-root` free to render Codex's pet spritesheet. A palette-matched scene wash keeps primary content readable over either bright or dark source artwork while preserving the source image underneath. The notification tray receives its own image-derived surface, title, body, control surface, and control text roles because Codex's host material mode can differ from the active skin mode. The right-side task/settings panel likewise receives a paired image-derived surface, primary text, secondary text, and section palette through its stable app-shell focus marker. Semantic text roles are tested independently against their actual surfaces so a dark upload cannot inherit dark host-theme text, and a light upload cannot inherit low-contrast light text.
 
 ## Build dependency
 

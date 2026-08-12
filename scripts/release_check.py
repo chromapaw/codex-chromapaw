@@ -69,10 +69,22 @@ def validate_repository() -> str:
             raise ReleaseCheckError(f"{path.relative_to(ROOT)} has no description")
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    if not re.search(rf"^## {re.escape(version)}\b", changelog, flags=re.MULTILINE):
-        raise ReleaseCheckError(f"CHANGELOG.md has no {version} release section")
+    release_version = version.split("+", 1)[0]
+    if not re.search(rf"^## {re.escape(release_version)}\b", changelog, flags=re.MULTILINE):
+        raise ReleaseCheckError(f"CHANGELOG.md has no {release_version} release section")
     if not (ROOT / ".github" / "workflows" / "ci.yml").is_file():
         raise ReleaseCheckError(".github/workflows/ci.yml is missing")
+    for relative in (
+        ".github/workflows/macos-enhanced.yml",
+        "package.json",
+        "package-lock.json",
+        "scripts/macos_enhanced_test.py",
+        "scripts/macos_visual_smoke.mjs",
+        "tests/fixtures/macos-harness/index.html",
+        "tests/fixtures/macos-harness/pet-overlay.html",
+    ):
+        if not (ROOT / relative).is_file():
+            raise ReleaseCheckError(f"{relative} is missing")
     return version
 
 

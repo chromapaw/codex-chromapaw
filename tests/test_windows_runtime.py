@@ -31,6 +31,7 @@ from windows_runtime import (  # noqa: E402
     load_adapters,
     monitor_runtime,
     redact_result,
+    refresh_active_runtime_css,
     refresh_preference_for_runtime_update,
     remember_preference,
     resume_runtime,
@@ -341,6 +342,85 @@ class WindowsRuntimeTests(unittest.TestCase):
             saved = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["cssHash"], "b" * 64)
 
+    def test_refresh_active_runtime_css_requires_acknowledgement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(RuntimeFailure) as context:
+                refresh_active_runtime_css(Path(temporary), acknowledged=False)
+            self.assertIn("acknowledge-runtime-update", str(context.exception))
+
+    def test_refresh_active_runtime_css_updates_state_and_restarts_monitor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            package = root / "skin"
+            package.mkdir()
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture-app")
+            adapters = ROOT / "runtime" / "windows-adapters.json"
+            executable_hash = hashlib.sha256(b"fixture-app").hexdigest()
+            state = {
+                "schemaVersion": 1,
+                "runtimeVersion": "old-runtime",
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "status": "active",
+                "pid": 101,
+                "executable": str(executable),
+                "executableHash": executable_hash,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(adapters),
+                "adapterFileHash": "d" * 64,
+                "port": 12345,
+                "allowedTargetSchemes": ["app"],
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "backupDir": str(backup_dir),
+                "monitorPid": 202,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+            }
+            (data_dir / "active.json").write_text(json.dumps(state), encoding="utf-8")
+            preflight = {
+                **state,
+                "cssHash": "e" * 64,
+            }
+            compiled = {"css": "body { color: white; }", "cssHash": "e" * 64}
+            endpoint = mock.Mock()
+            endpoint.version.return_value = {"Browser": "Chrome/fixture"}
+            monitor = mock.Mock(pid=303)
+            monitor.poll.return_value = None
+            paths = {101: executable, 202: Path(sys.executable).resolve()}
+            with mock.patch("windows_runtime.build_preflight", return_value=preflight), mock.patch(
+                "windows_runtime.compile_skin", return_value=compiled
+            ), mock.patch("windows_runtime.CdpEndpoint", return_value=endpoint), mock.patch(
+                "windows_runtime._adapter_for_state", return_value={"id": "fixture-adapter"}
+            ), mock.patch("windows_runtime._validate_browser_identity"), mock.patch(
+                "windows_runtime._windows_process_paths", return_value=paths
+            ), mock.patch("windows_runtime._terminate_monitor_process") as terminate, mock.patch(
+                "windows_runtime.inject_until_ready",
+                return_value=[{"targetId": "fixture", "result": {"applied": True}}],
+            ), mock.patch("windows_runtime._launch_monitor", return_value=monitor):
+                result = refresh_active_runtime_css(
+                    data_dir,
+                    adapters,
+                    acknowledged=True,
+                )
+            terminate.assert_called_once()
+            self.assertEqual(result["status"], "refreshed")
+            self.assertEqual(result["monitorPid"], 303)
+            saved = json.loads((data_dir / "active.json").read_text(encoding="utf-8"))
+            preferred = json.loads(
+                (data_dir / "preferred-skin.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved["cssHash"], "e" * 64)
+            self.assertEqual(saved["monitorPid"], 303)
+            self.assertEqual(preferred["cssHash"], "e" * 64)
+
     def test_resume_returns_without_relaunch_for_matching_healthy_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
@@ -553,6 +633,20 @@ class WindowsRuntimeTests(unittest.TestCase):
             compiled = compile_skin(package)
             self.assertIn("data:image/png;base64,", compiled["css"])
             self.assertIn('data-avatar-overlay-content-frame="true"', compiled["css"])
+            self.assertNotRegex(
+                compiled["css"],
+                r"\.codex-avatar-root\s*\{[^}]*background\s*:\s*transparent",
+            )
+            self.assertIn(
+                '[data-avatar-overlay-measure="notification-tray-row"]',
+                compiled["css"],
+            )
+            self.assertIn("--chromapaw-notification-surface", compiled["css"])
+            self.assertIn(
+                '[data-app-shell-focus-area="right-panel"]',
+                compiled["css"],
+            )
+            self.assertIn("--chromapaw-side-panel-surface", compiled["css"])
             self.assertNotIn('url("./background.png")', compiled["css"])
             self.assertRegex(compiled["cssHash"], r"^[0-9a-f]{64}$")
 

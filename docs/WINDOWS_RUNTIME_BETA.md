@@ -90,6 +90,14 @@ python scripts/windows_runtime.py --json verify
 
 Verification rechecks process identity, executable and adapter continuity, monitor identity, endpoint identity, target scheme, CSS hash, and session ownership. `verify --repair` may reapply the same validated CSS to an unstyled target; it refuses a changed package.
 
+If a reviewed local runtime update changes only the compiled CSS for the active package, hot-refresh it without closing Codex:
+
+```powershell
+python scripts/windows_runtime.py --json refresh-active-css --acknowledge-runtime-update
+```
+
+The refresh fails closed if the package manifest, executable, app version, adapter, or package identity changed. It replaces the session-owned style in both the main window and pet overlay, then restarts only ChromaPaw's hidden CSS monitor. Use a new reviewed activation for any identity change.
+
 ### Status
 
 ```powershell

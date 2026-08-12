@@ -33,7 +33,7 @@ except ImportError:
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.4"
+RUNTIME_VERSION = "0.4.6"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ADAPTERS = ROOT / "runtime" / "windows-adapters.json"
 ACTIVE_FILE = "active.json"
@@ -1160,6 +1160,143 @@ def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
         return result
 
 
+def refresh_active_runtime_css(
+    data_dir: Path,
+    adapters: Path = DEFAULT_ADAPTERS,
+    *,
+    acknowledged: bool,
+) -> dict[str, Any]:
+    """Hot-refresh CSS for the same reviewed package without restarting Codex."""
+    if not acknowledged:
+        raise RuntimeFailure(
+            "refreshing active skin CSS requires --acknowledge-runtime-update"
+        )
+    with runtime_lock(data_dir):
+        state = _read_active(data_dir)
+        if state is None:
+            raise RuntimeFailure("no active ChromaPaw Windows runtime session exists")
+
+        executable = Path(str(state["executable"])).expanduser().resolve()
+        if sha256_file(executable) != state.get("executableHash"):
+            raise RuntimeFailure("Codex executable hash changed after activation")
+        pid = state.get("pid")
+        process_path = _windows_process_paths().get(pid) if isinstance(pid, int) else None
+        if process_path is None or os.path.normcase(str(process_path)) != os.path.normcase(
+            str(executable)
+        ):
+            raise RuntimeFailure("runtime-launched Codex process is no longer running")
+
+        package = Path(str(state["package"])).expanduser().resolve()
+        adapters = adapters.expanduser().resolve()
+        preflight = build_preflight(package, executable, adapters)
+        immutable_fields = (
+            "packageId",
+            "manifestHash",
+            "executableHash",
+            "appVersion",
+            "adapterId",
+            "adapterFileHash",
+        )
+        changed = sorted(
+            field for field in immutable_fields if preflight.get(field) != state.get(field)
+        )
+        if changed:
+            raise RuntimeFailure(
+                "active skin identity changed; run a new reviewed activation instead: "
+                + ", ".join(changed)
+            )
+
+        endpoint = CdpEndpoint(int(state["port"]), timeout=5.0)
+        adapter = _adapter_for_state(state)
+        browser = endpoint.version()
+        _validate_browser_identity(browser, adapter)
+        schemes = set(state["allowedTargetSchemes"])
+        compiled = compile_skin(package)
+        previous_css_hash = str(state["cssHash"])
+
+        monitor_pid = state.get("monitorPid")
+        monitor_path = (
+            _windows_process_paths().get(monitor_pid) if isinstance(monitor_pid, int) else None
+        )
+        monitor_expected = state.get("monitorExecutable")
+        monitor_matches = (
+            monitor_path is not None
+            and isinstance(monitor_expected, str)
+            and os.path.normcase(str(monitor_path))
+            == os.path.normcase(str(Path(monitor_expected).resolve()))
+        )
+        if monitor_path is not None and not monitor_matches:
+            raise RuntimeFailure("refusing to stop a monitor whose executable identity changed")
+        if monitor_matches:
+            _terminate_monitor_process(state)
+
+        applied = inject_until_ready(
+            endpoint,
+            compiled,
+            str(state["sessionToken"]),
+            schemes,
+            8.0,
+            settle_seconds=0.5,
+        )
+        refreshed_at = utc_now()
+        state.update(
+            {
+                "runtimeVersion": RUNTIME_VERSION,
+                "cssHash": compiled["cssHash"],
+                "browser": browser,
+                "appliedTargets": applied,
+                "lastCssRefreshAt": refreshed_at,
+            }
+        )
+        atomic_json(data_dir / ACTIVE_FILE, state)
+        backup_dir = Path(str(state["backupDir"]))
+        atomic_json(backup_dir / "active.json", state)
+
+        monitor = _launch_monitor(data_dir, str(state["sessionId"]))
+        state["monitorPid"] = monitor.pid
+        state["monitorExecutable"] = str(Path(sys.executable).resolve())
+        state["monitorExecutableHash"] = sha256_file(Path(sys.executable).resolve())
+        state["monitorIntervalSeconds"] = 1.0
+        atomic_json(data_dir / ACTIVE_FILE, state)
+        atomic_json(backup_dir / "active.json", state)
+        time.sleep(0.25)
+        if monitor.poll() is not None:
+            raise RuntimeFailure(
+                "updated CSS is active, but the background runtime monitor exited during restart; retry refresh-active-css"
+            )
+
+        preference = remember_preference(data_dir, state)
+        atomic_json(backup_dir / PREFERENCE_FILE, preference)
+        changed_css = compiled["cssHash"] != previous_css_hash
+        _append_history(
+            data_dir,
+            {
+                "time": refreshed_at,
+                "event": "active-skin-css-refreshed",
+                "sessionId": state["sessionId"],
+                "packageId": state["packageId"],
+                "previousCssHash": previous_css_hash,
+                "cssHash": compiled["cssHash"],
+                "cssHashChanged": changed_css,
+                "monitorRestarted": True,
+            },
+        )
+        return {
+            "ok": True,
+            "status": "refreshed" if changed_css else "unchanged",
+            "sessionId": state["sessionId"],
+            "packageId": state["packageId"],
+            "appVersion": state["appVersion"],
+            "previousCssHash": previous_css_hash,
+            "cssHash": compiled["cssHash"],
+            "runtimeVersion": RUNTIME_VERSION,
+            "monitorPid": monitor.pid,
+            "monitorRestarted": True,
+            "targets": applied,
+            "immutableContinuity": {field: True for field in immutable_fields},
+        }
+
+
 def _config_line_key(line: str) -> str | None:
     stripped = line.lstrip()
     if "=" not in stripped or stripped.startswith("#"):
@@ -1509,6 +1646,12 @@ def main() -> int:
     )
     refresh_parser.add_argument("--acknowledge-runtime-update", action="store_true")
 
+    active_refresh_parser = subparsers.add_parser(
+        "refresh-active-css",
+        help="Hot-refresh CSS for the active reviewed skin without restarting Codex",
+    )
+    active_refresh_parser.add_argument("--acknowledge-runtime-update", action="store_true")
+
     subparsers.add_parser("status", help="Inspect active runtime state")
     subparsers.add_parser("stop", help="Remove CSS, stop launched Codex, and close CDP")
     subparsers.add_parser("restore", help="Restore the pre-activation state and close CDP")
@@ -1553,6 +1696,12 @@ def main() -> int:
             )
         elif args.command == "refresh-preference":
             result = refresh_preference_for_runtime_update(
+                data_dir,
+                adapters,
+                acknowledged=args.acknowledge_runtime_update,
+            )
+        elif args.command == "refresh-active-css":
+            result = refresh_active_runtime_css(
                 data_dir,
                 adapters,
                 acknowledged=args.acknowledge_runtime_update,

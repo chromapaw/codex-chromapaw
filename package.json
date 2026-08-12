@@ -1,0 +1,10 @@
+{
+  "name": "codex-chromapaw-macos-harness",
+  "private": true,
+  "scripts": {
+    "test:macos-visual": "node scripts/macos_visual_smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

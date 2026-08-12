@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" class="electron-dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChromaPaw macOS compatibility harness</title>
+    <link rel="stylesheet" href="./host.css" />
+    <script>
+      const params = new URLSearchParams(location.search);
+      const mode = params.get("mode") === "light" ? "light" : "dark";
+      document.documentElement.className = `electron-${mode}`;
+      const skin = document.createElement("link");
+      skin.rel = "stylesheet";
+      skin.href = params.get("skin");
+      skin.dataset.testSkin = "true";
+      document.head.append(skin);
+    </script>
+    <link rel="stylesheet" href="./layout.css" />
+  </head>
+  <body>
+    <div id="root">
+      <div class="app-frame">
+        <header class="mac-titlebar">
+          <div class="traffic-lights" aria-label="macOS window controls"><span></span><span></span><span></span></div>
+          <div class="titlebar-center"><span>ChromaPaw compatibility lab</span><span class="text-token-text-secondary">macOS cloud harness</span></div>
+          <div class="titlebar-actions"><button class="icon-button" aria-label="Search">⌕</button><button class="icon-button" aria-label="Layout">▦</button></div>
+        </header>
+
+        <aside class="app-shell-left-panel" aria-label="Primary navigation">
+          <div class="brand"><span class="brand-mark">CP</span><span>Codex ChromaPaw</span></div>
+          <div class="nav-label">Workspace</div>
+          <div class="nav-item"><span class="nav-dot"></span><span>New task</span></div>
+          <div class="nav-item active"><span class="nav-dot"></span><span>macOS enhanced test</span></div>
+          <div class="nav-item"><span class="nav-dot"></span><span>Skin Studio</span></div>
+          <div class="nav-label">Recent</div>
+          <div class="nav-item"><span class="nav-dot"></span><span>Adaptive palette</span></div>
+          <div class="nav-item"><span class="nav-dot"></span><span>Pet overlay isolation</span></div>
+        </aside>
+
+        <main class="main-surface">
+          <div class="content-column">
+            <div class="eyebrow">REAL GENERATED SKIN PACKAGE</div>
+            <h1>One macOS run, four layers of compatibility evidence.</h1>
+            <p class="lead">This fixture loads the exact CSS emitted by Skin Studio and deliberately starts with a conflicting light host palette. The generated skin must keep navigation, content, settings and pet surfaces readable.</p>
+
+            <section class="message" aria-label="Test summary">
+              <div class="message-header"><span>Enhanced compatibility suite</span><span class="status-pill">Running on macOS</span></div>
+              <div class="check-grid">
+                <div class="check-row"><span class="check">✓</span><span>Portable skin generated and validated</span></div>
+                <div class="check-row"><span class="check">✓</span><span>Pet install, replace and restore exercised</span></div>
+                <div class="check-row"><span class="check">✓</span><span>Right panel semantic colors rebound</span></div>
+                <div class="check-row"><span class="check">✓</span><span>Transparent pet overlay isolated</span></div>
+              </div>
+            </section>
+
+            <div class="composer"><div class="composer-copy">Generated UI evidence is captured in both light and dark modes.</div><button class="send-button" aria-label="Run">↑</button></div>
+          </div>
+        </main>
+
+        <aside data-app-shell-focus-area="right-panel" aria-label="Task settings">
+          <div class="right-panel-inner bg-token-main-surface-primary">
+            <div class="panel-heading">
+              <div><h2 class="text-token-text-primary">Compatibility details</h2><p class="text-token-text-secondary">Image-derived, contrast-safe tokens</p></div>
+              <button class="icon-button text-token-text-primary" aria-label="Close">×</button>
+            </div>
+
+            <div class="section-label text-token-description-foreground">Environment</div>
+            <section class="settings-section bg-token-bg-secondary" data-testid="right-panel-section">
+              <div class="setting-row"><div><div class="setting-title text-token-text-primary">Runtime</div><div class="setting-copy text-token-text-secondary">GitHub-hosted macOS virtual machine</div></div><div class="setting-value text-token-text-primary">Darwin</div></div>
+              <div class="setting-row"><div><div class="setting-title text-token-text-primary">Skin mode</div><div class="setting-copy text-token-text-secondary">Adaptive light and dark variants</div></div><div class="setting-value text-token-text-primary">Auto</div></div>
+            </section>
+
+            <div class="section-label text-token-description-foreground">Visual gates</div>
+            <section class="settings-section bg-token-bg-secondary">
+              <div class="setting-row"><div><div class="setting-title text-token-text-primary">Primary text</div><div class="setting-copy text-token-text-secondary">Minimum WCAG contrast</div></div><div class="setting-value text-token-text-primary">≥ 4.5:1</div></div>
+              <div class="setting-row"><div><div class="setting-title text-token-text-primary">Pet window</div><div class="setting-copy text-token-text-secondary">No rectangular skin background</div></div><div class="setting-value text-token-text-primary">Isolated</div></div>
+            </section>
+
+            <div class="panel-footer"><button class="primary-button">Export evidence</button></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

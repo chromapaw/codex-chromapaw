@@ -169,6 +169,10 @@ class SkinPackageValidationTests(unittest.TestCase):
             self.assertIn("white clouds", manifest["semanticProfile"]["motifs"])
             css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
             self.assertIn('data-avatar-overlay-content-frame="true"', css)
+            self.assertNotRegex(
+                css,
+                r"\.codex-avatar-root\s*\{[^}]*background\s*:\s*transparent",
+            )
             self.assertIn('background-image: url("./background.png")', css)
             self.assertIn(
                 "--color-token-text-primary: var(--chromapaw-ink) !important",
@@ -180,6 +184,35 @@ class SkinPackageValidationTests(unittest.TestCase):
             )
             self.assertIn(
                 "--color-token-input-background: rgb(var(--chromapaw-surface-input-rgb)",
+                css,
+            )
+            self.assertIn("--chromapaw-scene-wash: 0.66", css)
+            self.assertIn(
+                "background-color: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash))",
+                css,
+            )
+            self.assertIn(
+                '[data-avatar-overlay-measure="notification-tray-row"]',
+                css,
+            )
+            self.assertIn(
+                "background: var(--chromapaw-notification-surface) !important",
+                css,
+            )
+            self.assertIn(
+                '[data-avatar-overlay-measure-body="true"]',
+                css,
+            )
+            self.assertIn(
+                '[data-app-shell-focus-area="right-panel"]',
+                css,
+            )
+            self.assertIn(
+                "background: var(--chromapaw-side-panel-surface) !important",
+                css,
+            )
+            self.assertIn(
+                "--color-token-main-surface-primary: var(--chromapaw-side-panel-surface) !important",
                 css,
             )
             report = json.loads(
@@ -216,9 +249,20 @@ class SkinPackageValidationTests(unittest.TestCase):
             ),
         ):
             ui = semantic_ui_palette(palette, mode)
-            for role in ("primaryText", "secondaryText", "mutedText", "accentText"):
+            for role, surface_role in (
+                ("primaryText", "surface"),
+                ("secondaryText", "surface"),
+                ("mutedText", "surface"),
+                ("accentText", "surface"),
+                ("notificationText", "notificationSurface"),
+                ("notificationSecondaryText", "notificationSurface"),
+                ("notificationControlText", "notificationControlSurface"),
+                ("sidePanelText", "sidePanelSurface"),
+                ("sidePanelSecondaryText", "sidePanelSurface"),
+                ("sidePanelSectionText", "sidePanelSectionSurface"),
+            ):
                 self.assertGreaterEqual(
-                    contrast_ratio(ui["surface"], ui[role]),
+                    contrast_ratio(ui[surface_role], ui[role]),
                     4.5,
                     f"{mode} {role}",
                 )

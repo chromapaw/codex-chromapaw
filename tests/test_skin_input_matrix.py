@@ -36,9 +36,20 @@ class SkinInputMatrixTests(unittest.TestCase):
                 palettes = extract_palette(image)
                 for theme_mode in ("light", "dark"):
                     ui = semantic_ui_palette(palettes[theme_mode], theme_mode)
-                    for role in ("primaryText", "secondaryText", "mutedText", "accentText"):
+                    for role, surface_role in (
+                        ("primaryText", "surface"),
+                        ("secondaryText", "surface"),
+                        ("mutedText", "surface"),
+                        ("accentText", "surface"),
+                        ("notificationText", "notificationSurface"),
+                        ("notificationSecondaryText", "notificationSurface"),
+                        ("notificationControlText", "notificationControlSurface"),
+                        ("sidePanelText", "sidePanelSurface"),
+                        ("sidePanelSecondaryText", "sidePanelSurface"),
+                        ("sidePanelSectionText", "sidePanelSectionSurface"),
+                    ):
                         self.assertGreaterEqual(
-                            contrast_ratio(ui["surface"], ui[role]),
+                            contrast_ratio(ui[surface_role], ui[role]),
                             4.5,
                             f"{name} {theme_mode} {role}",
                         )

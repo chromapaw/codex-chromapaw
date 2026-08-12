@@ -78,6 +78,14 @@ Require `verify` to report:
 
 The monitor should repair a delayed unstyled target automatically. Use `verify --repair` only as an explicit diagnostic; if the package hash changed, restore and activate again.
 
+For a reviewed CSS-only runtime repair while the same skin session is active, require explicit acknowledgement and hot-refresh without closing Codex:
+
+```bash
+python scripts/windows_runtime.py --json refresh-active-css --acknowledge-runtime-update
+```
+
+Use this only when immutable package, executable, app-version, and adapter continuity must remain unchanged. If the command reports an identity change, stop and require a new reviewed activation. The command restarts only ChromaPaw's local CSS monitor.
+
 A successful activation writes `preferred-skin.json` with restart-safe identities and hashes. It must not persist the session token, CDP port, target ids, titles, or conversation content.
 
 Never use `--allow-parallel-profile` for ordinary activation. It exists only for an isolated compatibility fixture with a separate `--profile-dir`.

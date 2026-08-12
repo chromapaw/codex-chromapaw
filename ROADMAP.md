@@ -65,7 +65,8 @@
 
 ## 0.5 — Cross-platform and ecosystem
 
-- Real-Mac validation for skin generation and pet install/restore.
+- Run package generation, pet lifecycle, bundle probe, and simulated-renderer screenshot gates on Apple Silicon and Intel GitHub-hosted macOS runners.
+- Real-Mac validation against an installed Codex app for skin generation and pet install/restore.
 - Reversible exact-version macOS skin runtime investigation and implementation.
 - Community skin and pet gallery format.
 - Signed releases and reproducible packaging.

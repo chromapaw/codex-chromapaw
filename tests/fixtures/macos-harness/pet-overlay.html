@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" class="electron-dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChromaPaw transparent pet overlay harness</title>
+    <link rel="stylesheet" href="./host.css" />
+    <script>
+      const params = new URLSearchParams(location.search);
+      const mode = params.get("mode") === "light" ? "light" : "dark";
+      document.documentElement.className = `electron-${mode}`;
+      const skin = document.createElement("link");
+      skin.rel = "stylesheet";
+      skin.href = params.get("skin");
+      skin.dataset.testSkin = "true";
+      document.head.append(skin);
+      document.documentElement.style.setProperty("--test-pet-atlas", `url("${params.get("pet")}")`);
+    </script>
+    <link rel="stylesheet" href="./layout.css" />
+  </head>
+  <body class="pet-page">
+    <div id="root">
+      <div class="pet-overlay-frame" data-avatar-overlay-content-frame="true">
+        <div class="notification-row" data-avatar-overlay-measure="notification-tray-row">
+          <div class="notification-card">
+            <button class="notification-button" role="button">
+              <span class="notification-title">macOS compatibility run complete</span>
+              <span class="notification-body" data-avatar-overlay-measure-body="true">Skin, panel and pet lifecycle evidence is ready for review.</span>
+            </button>
+            <div class="notification-control" data-avatar-overlay-control="dismiss"><button aria-label="Dismiss">✓</button></div>
+          </div>
+        </div>
+        <div data-avatar-mascot="true" data-avatar-overlay-hit-region="mascot">
+          <div class="pet-sprite codex-avatar-root" style="background-image: var(--test-pet-atlas)"></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
