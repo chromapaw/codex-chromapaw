@@ -94,17 +94,29 @@ The ChromaPaw validator checks manifest safety, file containment, image format, 
 
 ## 5. Install or replace
 
+First generate the non-mutating user handoff:
+
+```text
+python scripts/post_generation_guidance.py pet <absolute-package-directory> --platform auto --json
+```
+
+Report `generated-not-installed` and stop. Do not treat the original generation request as permission to install.
+
 For a new id:
 
 ```text
 python scripts/install_pet.py <absolute-package-directory> --json
 ```
 
+Run that command only after the user replies `安装这个宠物`.
+
 If the id already exists, stop and show the destination. Only after explicit approval:
 
 ```text
 python scripts/install_pet.py <absolute-package-directory> --replace --json
 ```
+
+The approval must name the id, for example `同意替换安装宠物 basket-buddy`.
 
 The replace path moves the previous directory into `pets/.chromapaw-backups/` before installing the staged package. Report both the destination and backup path.
 

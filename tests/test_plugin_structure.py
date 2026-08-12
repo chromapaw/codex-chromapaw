@@ -63,6 +63,7 @@ class PluginStructureTests(unittest.TestCase):
             "scripts/prepare_skin_request.py",
             "scripts/build_skin_package.py",
             "scripts/validate_skin_package.py",
+            "scripts/post_generation_guidance.py",
             "skills/create-chromapaw-skin/references/skin-package.md",
             "skills/create-chromapaw-skin/references/theme-profile.md",
             "docs/SKIN_STUDIO_MVP.md",

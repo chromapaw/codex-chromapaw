@@ -40,6 +40,8 @@ python scripts/prepare_skin_request.py \
 
 Omit `--artwork` when the original is already a complete environment. Read the generated request and confirm that its embedded `themeProfile` still matches the current upload before building.
 
+When the approved artwork stages its primary subject, also pass `--subject-placement left` or `right`. The builder keeps the source crisp, limits global edge wash to 0.08, and puts the main local reading veil on the opposite side. Use `edge-balanced` only when reviewed artwork deliberately frames both sides.
+
 ## 4. Build and validate
 
 ```text
@@ -96,3 +98,11 @@ Inspect both light and dark 16:10 previews, then check the narrow-height 16:9 an
 ## 6. Activation boundary
 
 The stylesheets are portable package content, not permission to inject into Codex. Finish and validate the package first. If the user separately requests activation, hand off to `$manage-chromapaw`. Windows uses its exact-version Runtime Beta workflow. macOS currently provides only a read-only compatibility probe; it does not activate a skin.
+
+After validation, always run:
+
+```text
+python scripts/post_generation_guidance.py skin <absolute-package-directory> --platform auto --json
+```
+
+Report `generated-not-active` and the returned next step. On Windows, `应用这个皮肤` starts only a read-only preflight; activation still requires the separate experimental-runtime confirmation defined by `$manage-chromapaw`.

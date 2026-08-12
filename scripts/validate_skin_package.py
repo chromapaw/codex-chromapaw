@@ -309,7 +309,7 @@ def _validate_v2(root: Path, data: dict[str, Any], errors: list[str]) -> None:
         _check_fields(
             layout,
             {"safeContentZone", "depthLayers"},
-            {"safeContentZone", "depthLayers"},
+            {"safeContentZone", "depthLayers", "visualTreatment"},
             "layout",
             errors,
         )
@@ -332,6 +332,53 @@ def _validate_v2(root: Path, data: dict[str, Any], errors: list[str]) -> None:
         expected_layers = ["atmosphere", "distant", "midground", "foreground"]
         if layers != expected_layers:
             errors.append("layout.depthLayers must list atmosphere, distant, midground, and foreground in order")
+        treatment = layout.get("visualTreatment")
+        if treatment is not None:
+            if not isinstance(treatment, dict):
+                errors.append("layout.visualTreatment must be an object")
+            else:
+                treatment_keys = {
+                    "sceneFidelity",
+                    "contentProtection",
+                    "subjectPlacement",
+                    "artworkRecomposed",
+                    "globalWashOpacity",
+                }
+                _check_fields(
+                    treatment,
+                    treatment_keys,
+                    treatment_keys,
+                    "layout.visualTreatment",
+                    errors,
+                )
+                if treatment.get("sceneFidelity") != "preserve":
+                    errors.append("layout.visualTreatment.sceneFidelity must be preserve")
+                if treatment.get("contentProtection") != "local-surfaces":
+                    errors.append(
+                        "layout.visualTreatment.contentProtection must be local-surfaces"
+                    )
+                if treatment.get("subjectPlacement") not in {
+                    "source",
+                    "left",
+                    "right",
+                    "edge-balanced",
+                }:
+                    errors.append(
+                        "layout.visualTreatment.subjectPlacement must be source, left, right, or edge-balanced"
+                    )
+                if not isinstance(treatment.get("artworkRecomposed"), bool):
+                    errors.append(
+                        "layout.visualTreatment.artworkRecomposed must be a boolean"
+                    )
+                wash = treatment.get("globalWashOpacity")
+                if (
+                    isinstance(wash, bool)
+                    or not isinstance(wash, (int, float))
+                    or not 0 <= wash <= 0.12
+                ):
+                    errors.append(
+                        "layout.visualTreatment.globalWashOpacity must be between 0 and 0.12"
+                    )
 
     variants = data.get("variants")
     found_pairs: set[tuple[str, str]] = set()

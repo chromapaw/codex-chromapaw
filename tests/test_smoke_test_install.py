@@ -31,6 +31,7 @@ class SmokeTestInstallTests(unittest.TestCase):
             self.assertTrue((staged / ".codex-plugin" / "plugin.json").is_file())
             self.assertFalse((staged / ".git").exists())
             self.assertFalse((staged / "work").exists())
+            self.assertFalse((staged / "outputs").exists())
 
 
 if __name__ == "__main__":

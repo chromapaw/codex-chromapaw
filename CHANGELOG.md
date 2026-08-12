@@ -2,13 +2,17 @@
 
 ## Unreleased
 
+- Replace the 66% full-window scene wash with an 8% edge treatment, crisp scene saturation/contrast, and directional local reading protection so uploaded subjects stay vivid and dimensional.
+- Recompose complete-environment uploads when a face, character, logo, or hero object conflicts with Codex's reading/input safe zone; stage the subject left or right instead of blurring or fading it.
+- Record subject placement, recomposition state, local-surface protection, and the bounded global wash in generated package metadata and QA.
+- Add a deterministic post-generation handoff for skins and pets that reports `generated-not-active` or `generated-not-installed`, tells the user the exact next confirmation phrase, and never treats generation as activation or installation consent.
 - Preserve Codex's pet sprite background while isolating the transparent avatar overlay from skin backgrounds.
 - Derive an accessible pet notification surface, title, body, and control palette from every uploaded image instead of mixing host material backgrounds with skin text tokens.
 - Bind Codex's right-side task and settings panel to image-derived surface and text roles so nested host-theme scopes cannot create light-on-light or dark-on-dark controls.
 - Add an acknowledged `refresh-active-css` repair path that updates the same reviewed skin in place, rechecks immutable runtime identity, and restarts only the local CSS monitor without closing Codex.
 - Add regression coverage preventing generated skin CSS from clearing `.codex-avatar-root` with a background shorthand.
 - Add an Apple Silicon and Intel macOS enhanced compatibility harness that builds a real skin, exercises the pet filesystem lifecycle, probes an Electron-shaped app bundle, verifies right-panel and transparent-overlay rendering, and uploads screenshot evidence without claiming live Codex activation.
-- Add a palette-matched scene wash so primary content remains readable over arbitrary bright or dark uploaded artwork in both fixed theme variants.
+- Add palette-matched local reading surfaces so primary content remains readable over arbitrary bright or dark uploaded artwork without flattening the complete scene.
 
 ## 0.4.5 — 2026-08-11
 

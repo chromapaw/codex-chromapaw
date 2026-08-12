@@ -24,6 +24,8 @@ Read [references/safety-model.md](references/safety-model.md) completely before 
 - **Stop or restore skin:** use the active runtime state. Never reconstruct session identifiers, ports, process ids, or backup paths from guesses.
 - **Remove:** delete only the selected ChromaPaw asset after confirming its resolved path remains inside the declared root.
 
+The standard post-generation phrase `应用这个皮肤` authorizes only read-only discovery and preflight. It is not the experimental runtime acknowledgment. Likewise, `安装这个宠物` authorizes a new pet install only; replacement requires the id-specific `同意替换安装宠物 <id>` phrase after the destination is shown.
+
 ## Windows Runtime Beta workflow
 
 The runtime is Windows-only and experimental. It is not an official OpenAI skin API. It must not patch `WindowsApps`, `app.asar`, signed application files, or Codex UI source files.

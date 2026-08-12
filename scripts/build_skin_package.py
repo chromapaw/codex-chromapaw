@@ -29,9 +29,10 @@ except ImportError:
     from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
 
-GENERATOR_VERSION = "0.4.6"
+GENERATOR_VERSION = "0.4.7"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
+GLOBAL_WASH_OPACITY = 0.08
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
@@ -195,13 +196,39 @@ def _rgb(value: str) -> str:
     return " ".join(str(int(value[index : index + 2], 16)) for index in (1, 3, 5))
 
 
-def _variable_block(palette: dict[str, Any], selector: str, mode: str) -> str:
+def _variable_block(
+    palette: dict[str, Any], selector: str, mode: str, subject_placement: str
+) -> str:
     surface = palette["surface"]
     ink = palette["ink"]
     accent = palette["accent"]
     ui = semantic_ui_palette(palette, mode)
     opacity = palette["panelOpacity"]
-    scene_wash = 0.66
+    if subject_placement == "right":
+        content_veil = (
+            "linear-gradient(90deg, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
+        )
+    elif subject_placement == "left":
+        content_veil = (
+            "linear-gradient(270deg, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
+        )
+    elif subject_placement == "edge-balanced":
+        content_veil = (
+            "radial-gradient(ellipse at center, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.34) 0%, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.18) 56%, transparent 92%)"
+        )
+    else:
+        content_veil = (
+            "linear-gradient(90deg, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.24), "
+            "rgb(var(--chromapaw-surface-rgb) / 0.32) 52%, "
+            "rgb(var(--chromapaw-surface-rgb) / 0.18))"
+        )
     return f"""{selector} {{
   --chromapaw-surface: {surface};
   --chromapaw-surface-rgb: {_rgb(surface)};
@@ -230,22 +257,44 @@ def _variable_block(palette: dict[str, Any], selector: str, mode: str) -> str:
   --chromapaw-side-panel-section-text: {ui['sidePanelSectionText']};
   --chromapaw-color-scheme: {mode};
   --chromapaw-panel-opacity: {opacity};
-  --chromapaw-scene-wash: {scene_wash};
+  --chromapaw-scene-wash: {GLOBAL_WASH_OPACITY};
+  --chromapaw-scene-saturation: 1.08;
+  --chromapaw-scene-contrast: 1.06;
+  --chromapaw-scene-position: center;
+  --chromapaw-content-veil: {content_veil};
 }}"""
 
 
-def build_css(palettes: dict[str, Any], mode: str) -> str:
+def build_css(
+    palettes: dict[str, Any], mode: str, visual_treatment: dict[str, Any] | None = None
+) -> str:
+    subject_placement = str((visual_treatment or {}).get("subjectPlacement", "source"))
     blocks = []
     if mode == "adaptive":
-        blocks.append(_variable_block(palettes["light"], ":root, html.electron-light", "light"))
-        blocks.append(_variable_block(palettes["dark"], "html.electron-dark", "dark"))
+        blocks.append(
+            _variable_block(
+                palettes["light"], ":root, html.electron-light", "light", subject_placement
+            )
+        )
+        blocks.append(
+            _variable_block(
+                palettes["dark"], "html.electron-dark", "dark", subject_placement
+            )
+        )
         blocks.append(
             "@media (prefers-color-scheme: dark) {\n"
-            + _variable_block(palettes["dark"], ":root:not(.electron-light)", "dark")
+            + _variable_block(
+                palettes["dark"],
+                ":root:not(.electron-light)",
+                "dark",
+                subject_placement,
+            )
             + "\n}"
         )
     else:
-        blocks.append(_variable_block(palettes[mode], ":root, html", mode))
+        blocks.append(
+            _variable_block(palettes[mode], ":root, html", mode, subject_placement)
+        )
 
     common = r"""
 
@@ -416,9 +465,12 @@ body::before {
   pointer-events: none;
   background-color: var(--chromapaw-surface);
   background-image: url("./background.png");
-  background-position: center;
+  background-position: var(--chromapaw-scene-position);
   background-repeat: no-repeat;
   background-size: cover;
+  filter:
+    saturate(var(--chromapaw-scene-saturation))
+    contrast(var(--chromapaw-scene-contrast));
 }
 
 body::after {
@@ -427,14 +479,21 @@ body::after {
   inset: 0;
   content: "";
   pointer-events: none;
-  background-color: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash));
+  background-color: transparent;
   background-image:
     linear-gradient(
       90deg,
-      rgb(var(--chromapaw-surface-rgb) / 0.22),
-      transparent 22%,
+      rgb(var(--chromapaw-surface-rgb) / 0.12),
+      transparent 18%,
+      transparent 82%,
+      rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash))
+    ),
+    linear-gradient(
+      180deg,
+      rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash)),
+      transparent 20%,
       transparent 78%,
-      rgb(var(--chromapaw-surface-rgb) / 0.16)
+      rgb(var(--chromapaw-surface-rgb) / 0.11)
     );
 }
 
@@ -464,10 +523,20 @@ body:has([data-avatar-overlay-content-frame="true"])
   z-index: 1;
 }
 
-#root > div,
+#root > div {
+  background-color: transparent !important;
+}
+
+/*
+ * Keep the artwork crisp. Readability comes from a directional local veil in
+ * the main reading surface and opaque-enough component surfaces, never from a
+ * full-window fog layer. Recomposition places a face or hero subject on the
+ * side opposite this veil.
+ */
 .app-shell-main-content-viewport,
 main.main-surface {
   background-color: transparent !important;
+  background-image: var(--chromapaw-content-veil) !important;
 }
 
 [data-avatar-mascot="true"],
@@ -603,7 +672,7 @@ main.main-surface {
 }
 """
     return (
-        "/* ChromaPaw Skin Studio v0.3 portable stylesheet. Activation requires a compatible runtime. */\n"
+        "/* ChromaPaw Skin Studio v0.4.7 scene-fidelity stylesheet. Activation requires a compatible runtime. */\n"
         + "\n\n".join(blocks)
         + common
     )
@@ -628,9 +697,15 @@ def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _cover(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+def _cover(
+    image: Image.Image, size: tuple[int, int], subject_placement: str = "source"
+) -> Image.Image:
+    centering = {
+        "left": (0.42, 0.5),
+        "right": (0.58, 0.5),
+    }.get(subject_placement, (0.5, 0.5))
     return ImageOps.fit(
-        image.convert("RGB"), size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5)
+        image.convert("RGB"), size, method=Image.Resampling.LANCZOS, centering=centering
     ).convert("RGBA")
 
 
@@ -640,10 +715,12 @@ def render_preview(
     mode: str,
     palette: dict[str, Any],
     display_name: str,
+    visual_treatment: dict[str, Any] | None = None,
 ) -> Image.Image:
     """Render a real-artwork desktop mockup for visual QA."""
     width, height = size
-    canvas = _cover(artwork, size)
+    subject_placement = str((visual_treatment or {}).get("subjectPlacement", "source"))
+    canvas = _cover(artwork, size, subject_placement)
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     surface = tuple(int(palette["surface"][i : i + 2], 16) for i in (1, 3, 5))
@@ -654,8 +731,11 @@ def render_preview(
     panel_alpha = round(float(palette["panelOpacity"]) * 255)
     shadow = (0, 0, 0, 34 if mode == "light" else 72)
 
-    if mode == "dark":
-        draw.rectangle((0, 0, width, height), fill=(4, 12, 16, 112))
+    edge_alpha = 22 if mode == "light" else 34
+    draw.rectangle((0, 0, width, max(1, round(height * 0.025))), fill=surface + (edge_alpha,))
+    draw.rectangle(
+        (0, round(height * 0.975), width, height), fill=surface + (edge_alpha,)
+    )
 
     sidebar = round(width * 0.22)
     draw.rectangle((0, 0, sidebar + 8, height), fill=shadow)
@@ -667,7 +747,8 @@ def render_preview(
     brand_font = _font(max(16, round(width * 0.021)), bold=True)
     body_font = _font(max(11, round(width * 0.012)))
     small_font = _font(max(9, round(width * 0.010)))
-    title_font = _font(max(19, round(width * 0.026)), bold=True)
+    title_size = max(19, round(width * 0.026))
+    title_font = _font(title_size, bold=True)
     draw.ellipse((margin, top, margin + 28, top + 28), fill=accent + (245,))
     draw.text((margin + 38, top + 2), "ChromaPaw", font=brand_font, fill=ink + (245,))
 
@@ -693,9 +774,21 @@ def render_preview(
 
     main_left = sidebar + round(width * 0.055)
     main_right = width - round(width * 0.06)
+    if subject_placement == "right":
+        main_right = main_left + round((main_right - main_left) * 0.62)
+    elif subject_placement == "left":
+        available = main_right - main_left
+        main_left = main_left + round(available * 0.38)
     content_width = main_right - main_left
     draw.text((main_left, top + 3), "SKIN STUDIO  /  PREVIEW", font=small_font, fill=accent + (245,))
     title_position = (main_left, top + 31)
+    title_width = max(80, main_right - main_left - 12)
+    while title_size > 14:
+        candidate_box = draw.textbbox(title_position, display_name, font=title_font)
+        if candidate_box[2] - candidate_box[0] <= title_width:
+            break
+        title_size -= 1
+        title_font = _font(title_size, bold=True)
     title_box = draw.textbbox(title_position, display_name, font=title_font)
     draw.rounded_rectangle(
         (
@@ -869,7 +962,9 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
     }
     for stylesheet_mode, relative in stylesheets.items():
         (output / relative).write_text(
-            build_css(palettes, stylesheet_mode), encoding="utf-8", newline="\n"
+            build_css(palettes, stylesheet_mode, request.get("visualTreatment")),
+            encoding="utf-8",
+            newline="\n",
         )
 
     preview_assets: dict[str, str] = {}
@@ -879,7 +974,12 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
             key = f"{variant_mode}-{ratio.replace(':', 'x')}"
             relative = f"assets/previews/preview-{key}.png"
             preview = render_preview(
-                artwork, size, variant_mode, palettes[variant_mode], str(request["displayName"])
+                artwork,
+                size,
+                variant_mode,
+                palettes[variant_mode],
+                str(request["displayName"]),
+                request.get("visualTreatment"),
             )
             preview.save(output / relative, format="PNG", optimize=True)
             preview_assets[key] = relative
@@ -975,6 +1075,16 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
                 "status": "pass",
                 "value": "codex-and-vscode-token-families",
             },
+            {
+                "id": "scene-fidelity-local-protection",
+                "status": "pass",
+                "value": {
+                    "globalWashOpacity": GLOBAL_WASH_OPACITY,
+                    "contentProtection": "local-surfaces",
+                    "backgroundBlur": False,
+                },
+                "threshold": {"maximumGlobalWashOpacity": 0.12},
+            },
         ]
         + ui_contrast_checks,
         "activation": {
@@ -1007,6 +1117,17 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
         "layout": {
             "safeContentZone": SAFE_CONTENT_ZONE,
             "depthLayers": DEPTH_LAYERS,
+            "visualTreatment": {
+                "sceneFidelity": "preserve",
+                "contentProtection": "local-surfaces",
+                "subjectPlacement": str(
+                    request.get("visualTreatment", {}).get("subjectPlacement", "source")
+                ),
+                "artworkRecomposed": bool(
+                    request.get("visualTreatment", {}).get("artworkRecomposed", False)
+                ),
+                "globalWashOpacity": GLOBAL_WASH_OPACITY,
+            },
         },
         "variants": variants,
         "source": request["source"],

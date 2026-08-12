@@ -10,4 +10,5 @@ build/
 Thumbs.db
 work/
 generated/
+outputs/
 artifacts/

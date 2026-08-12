@@ -81,6 +81,13 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
     if args.source_url:
         source["url"] = clean_text(args.source_url, "source URL", 500)
 
+    subject_placement = getattr(args, "subject_placement", "source")
+    if subject_placement not in {"source", "left", "right", "edge-balanced"}:
+        raise ValueError(
+            "subject placement must be source, left, right, or edge-balanced"
+        )
+    artwork_recomposed = artwork != reference
+
     return {
         "schemaVersion": 2,
         "id": skin_id,
@@ -91,6 +98,13 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
         "artworkImage": str(artwork),
         "sceneBrief": scene_brief,
         "themeProfile": profile,
+        "visualTreatment": {
+            "sceneFidelity": "preserve",
+            "contentProtection": "local-surfaces",
+            "subjectPlacement": subject_placement,
+            "artworkRecomposed": artwork_recomposed,
+            "globalWashMaximum": 0.12,
+        },
         "source": source,
         "target": {
             "kind": "chromapaw-portable-skin",
@@ -121,6 +135,15 @@ def main() -> int:
     parser.add_argument("--description", help="One-sentence skin description")
     parser.add_argument("--mode", choices=("light", "dark", "adaptive"), default="adaptive")
     parser.add_argument("--scene-brief", help="Scene expansion and composition notes")
+    parser.add_argument(
+        "--subject-placement",
+        choices=("source", "left", "right", "edge-balanced"),
+        default="source",
+        help=(
+            "Where the approved artwork keeps its main subject. Use left or right "
+            "after safe-zone recomposition so the reading veil protects the opposite side."
+        ),
+    )
     parser.add_argument("--author", default="User-provided reference")
     parser.add_argument("--license", default="Unspecified")
     parser.add_argument("--source-url")

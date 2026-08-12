@@ -50,8 +50,12 @@ python scripts/prepare_theme_profile.py \
 
 Read `theme-profile.json` after creation. Its `referenceSha256` must match the current upload. A value cannot appear in both `motifs` and `avoidElements`; the script rejects that contradiction.
 
-## Scene expansion
+## Subject-aware scene expansion
 
-Expand only when the upload is not already a complete environment. Build the image-generation prompt from the user request and the validated profile. Include the reference image for identity grounding. Do not add beach objects to a sky image, plants to a comic image, city elements to an abstract texture, or any other category that lacks support in the current inputs.
+Expand when the upload is not already a complete environment. Also recompose a complete environment when a face, character, logo, bright hero object, or important text materially overlaps the normalized reading/input safe zone. A complete background is not automatically a usable interface composition.
 
-After expansion, review the result against every motif, forbidden element, depth description, and safe-zone instruction before passing it to the deterministic builder.
+For subject conflicts, ask image generation for a desktop-width adaptation with the recognizable subject staged on the left or right, quiet low-detail negative space on the opposite side, unchanged identity cues and visual style, and layered foreground/midground separation. Preserve sharp edges, local contrast, and lighting on the subject. Do not fade, blur, desaturate, or cover the complete image to manufacture readability.
+
+Build the image-generation prompt from the user request and validated profile. Include the reference image for identity grounding. Do not add beach objects to a sky image, plants to a comic image, city elements to an abstract texture, or any other category that lacks support in the current inputs.
+
+After expansion or recomposition, review the result against every identity cue, motif, forbidden element, depth description, and safe-zone instruction before passing it to the deterministic builder. Record the actual subject side with `prepare_skin_request.py --subject-placement`.

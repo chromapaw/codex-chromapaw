@@ -89,6 +89,7 @@ def stage_local_marketplace(plugin_root: Path, staging_root: Path) -> Path:
             "build",
             "dist",
             "generated",
+            "outputs",
             "work",
         ),
     )

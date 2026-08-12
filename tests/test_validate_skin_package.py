@@ -167,6 +167,10 @@ class SkinPackageValidationTests(unittest.TestCase):
             self.assertEqual(len(manifest["assets"]["previews"]), 6)
             self.assertEqual(manifest["semanticProfile"]["themeName"], "Open Blue Sky")
             self.assertIn("white clouds", manifest["semanticProfile"]["motifs"])
+            treatment = manifest["layout"]["visualTreatment"]
+            self.assertEqual(treatment["sceneFidelity"], "preserve")
+            self.assertEqual(treatment["contentProtection"], "local-surfaces")
+            self.assertLessEqual(treatment["globalWashOpacity"], 0.12)
             css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
             self.assertIn('data-avatar-overlay-content-frame="true"', css)
             self.assertNotRegex(
@@ -186,11 +190,14 @@ class SkinPackageValidationTests(unittest.TestCase):
                 "--color-token-input-background: rgb(var(--chromapaw-surface-input-rgb)",
                 css,
             )
-            self.assertIn("--chromapaw-scene-wash: 0.66", css)
+            self.assertIn("--chromapaw-scene-wash: 0.08", css)
             self.assertIn(
-                "background-color: rgb(var(--chromapaw-surface-rgb) / var(--chromapaw-scene-wash))",
+                "background-color: transparent",
                 css,
             )
+            self.assertIn("--chromapaw-content-veil:", css)
+            self.assertIn("saturate(var(--chromapaw-scene-saturation))", css)
+            self.assertNotRegex(css, r"body::before\s*\{[^}]*blur\(")
             self.assertIn(
                 '[data-avatar-overlay-measure="notification-tray-row"]',
                 css,
@@ -226,6 +233,47 @@ class SkinPackageValidationTests(unittest.TestCase):
                     if "-ui-" in check["id"]
                 )
             )
+            fidelity = next(
+                check
+                for check in report["checks"]
+                if check["id"] == "scene-fidelity-local-protection"
+            )
+            self.assertEqual(fidelity["status"], "pass")
+            self.assertFalse(fidelity["value"]["backgroundBlur"])
+
+    def test_subject_placement_selects_directional_local_veil(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "hero.png"
+            write_rgba_png(image, 96, 64)
+            _, profile_path = make_theme_profile(root, image)
+            request = build_request(
+                Namespace(
+                    image=image,
+                    artwork=image,
+                    theme_profile=profile_path,
+                    name="Right Stage Hero",
+                    id="right-stage-hero",
+                    description="A clear subject staged away from the reading zone.",
+                    mode="adaptive",
+                    scene_brief=None,
+                    subject_placement="right",
+                    author="Test artist",
+                    license="CC0-1.0",
+                    source_url=None,
+                )
+            )
+            request_path = root / "skin-request.json"
+            request_path.write_text(json.dumps(request), encoding="utf-8")
+            package = root / "package"
+            build_package(request_path, package)
+            css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
+            self.assertIn("linear-gradient(90deg", css)
+            manifest = json.loads((package / "skin.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["layout"]["visualTreatment"]["subjectPlacement"], "right"
+            )
+            self.assertEqual(validate_package(package), [])
 
     def test_semantic_ui_palette_keeps_muted_and_accent_text_accessible(self) -> None:
         for mode, palette in (

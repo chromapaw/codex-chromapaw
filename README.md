@@ -12,9 +12,10 @@ Turn one uploaded image into an image-specific Codex skin or animated pet.
 2. Ask for a **pet** or **skin**.
 3. ChromaPaw analyzes only that image and the current request.
 4. It creates a reviewable preview and a validated portable package.
-5. Installation or live activation is handled separately and only on a supported platform path.
+5. ChromaPaw reports `generated-not-installed` or `generated-not-active` and shows the exact separate confirmation phrase for the supported next step.
+6. Installation or live activation begins only after that confirmation; Windows skin activation still requires its later experimental-runtime acknowledgment after read-only preflight.
 
-For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing the image's style, mood, identity cues, motifs, forbidden elements, four spatial depth descriptions, and safe-zone guidance. The four depth layers are composition slots, not a fixed beach template. A sky upload can use clouds and sunlight; comic art can use panels, halftone, and speed lines. Beach, waves, sand, or coral appear only when the upload or user request supports them.
+For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing the image's style, mood, identity cues, motifs, forbidden elements, four spatial depth descriptions, and safe-zone guidance. The four depth layers are composition slots, not a fixed beach template. A sky upload can use clouds and sunlight; comic art can use panels, halftone, and speed lines. Beach, waves, sand, or coral appear only when the upload or user request supports them. Prominent subjects that overlap the content safe zone are recomposed onto a side stage instead of being faded, blurred, or covered by a full-window wash.
 
 ## Current status
 
@@ -37,7 +38,8 @@ On the current Windows development machine, standalone Codex `26.707.9981.0` has
 - Bind the semantic theme profile to the original image hash and reject mismatches or motif/exclusion contradictions.
 - Derive primary, secondary, muted, accent, on-accent, elevated, and input colors for both light and dark variants, with a minimum 4.5:1 text contrast gate.
 - Override Codex and VS Code semantic UI tokens so the uploaded background cannot leave menus or navigation using unreadable host-theme colors.
-- Use a full environment directly, or expand a smaller cue into image-specific scene artwork first.
+- Use a safe full environment directly; otherwise expand or recompose it into image-specific scene artwork with the hero subject staged away from the reading/input zones.
+- Preserve crisp scene fidelity with an 8% edge treatment and directional local reading surfaces instead of a full-window color wash.
 - Extract accessible light and dark palettes and generate light, dark, and adaptive CSS.
 - Render six visual-QA previews across 16:10, 16:9, and 4:3 window ratios.
 - Record safe content zones, image-specific depth layers, attribution, semantic metadata, and structured QA.

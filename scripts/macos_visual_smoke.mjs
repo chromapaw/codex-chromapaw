@@ -74,6 +74,15 @@ async function startServer(root) {
 
 const colorProbe = `() => {
   const parse = (value) => {
+    const hex = String(value).trim().match(/^#([0-9a-f]{6})$/i);
+    if (hex) {
+      return {
+        r: Number.parseInt(hex[1].slice(0, 2), 16),
+        g: Number.parseInt(hex[1].slice(2, 4), 16),
+        b: Number.parseInt(hex[1].slice(4, 6), 16),
+        a: 1,
+      };
+    }
     const match = String(value).match(/rgba?\\(([^)]+)\\)/i);
     if (!match) throw new Error('unsupported computed color: ' + value);
     const parts = match[1].replaceAll(',', ' ').split(/\\s+/).filter(Boolean).map(Number);
@@ -102,20 +111,23 @@ const colorProbe = `() => {
   const primary = style('[data-testid="right-panel-section"] .text-token-text-primary');
   const secondary = style('[data-testid="right-panel-section"] .text-token-text-secondary');
   const mainText = style('h1');
+  const mainSurface = style('main.main-surface');
   const sidebar = style('.app-shell-left-panel');
   const sidebarText = style('.nav-item.active');
   const before = getComputedStyle(document.body, '::before');
   const after = getComputedStyle(document.body, '::after');
-  const sceneOnBlack = composite(after.backgroundColor, 'rgb(0, 0, 0)');
-  const sceneOnWhite = composite(after.backgroundColor, 'rgb(255, 255, 255)');
+  const root = style(':root');
+  const semanticSurface = root.getPropertyValue('--chromapaw-surface').trim();
   return {
     skinLoaded: Boolean(document.querySelector('link[data-test-skin]')?.sheet),
     scene: {
       display: before.display,
       backgroundImage: before.backgroundImage,
       wash: after.backgroundColor,
+      sceneFilter: before.filter,
+      localProtection: mainSurface.backgroundImage,
       mainText: mainText.color,
-      worstCaseContrast: Math.min(ratio(mainText.color, sceneOnBlack), ratio(mainText.color, sceneOnWhite)),
+      semanticContrast: ratio(mainText.color, semanticSurface),
     },
     sidebar: {
       background: sidebar.backgroundColor,
@@ -185,11 +197,19 @@ async function run() {
   const skinPackage = path.resolve(args["skin-package"]);
   const petPackage = path.resolve(args["pet-package"]);
   const output = path.resolve(args.output);
-  await fs.mkdir(output, { recursive: true });
+  const skinStylesheets = {};
   const manifest = JSON.parse(await fs.readFile(path.join(skinPackage, "skin.json"), "utf8"));
   const petManifest = JSON.parse(await fs.readFile(path.join(petPackage, "pet.json"), "utf8"));
+  for (const mode of ["light", "dark"]) {
+    skinStylesheets[mode] = relativeUrl(
+      root,
+      path.join(skinPackage, manifest.assets.stylesheets[mode]),
+    );
+  }
+  const petUrl = relativeUrl(root, path.join(petPackage, petManifest.spritesheetPath));
+  await fs.mkdir(output, { recursive: true });
   const { server, origin } = await startServer(root);
-  const launchOptions = { headless: true };
+  const launchOptions = { headless: true, timeout: 15000 };
   if (process.env.CHROMAPAW_PLAYWRIGHT_EXECUTABLE) {
     launchOptions.executablePath = process.env.CHROMAPAW_PLAYWRIGHT_EXECUTABLE;
   }
@@ -197,18 +217,25 @@ async function run() {
   const results = {};
   try {
     for (const mode of ["light", "dark"]) {
-      const stylesheet = path.join(skinPackage, manifest.assets.stylesheets[mode]);
-      const skinUrl = relativeUrl(root, stylesheet);
-      const petUrl = relativeUrl(root, path.join(petPackage, petManifest.spritesheetPath));
+      const skinUrl = skinStylesheets[mode];
       const mainPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+      mainPage.setDefaultTimeout(15000);
       const mainUrl = new URL("/tests/fixtures/macos-harness/index.html", origin);
       mainUrl.searchParams.set("mode", mode);
       mainUrl.searchParams.set("skin", skinUrl);
-      await mainPage.goto(mainUrl.toString(), { waitUntil: "networkidle" });
+      await mainPage.goto(mainUrl.toString(), { waitUntil: "domcontentloaded", timeout: 15000 });
+      await mainPage.waitForFunction(
+        () => Boolean(document.querySelector('link[data-test-skin]')?.sheet),
+        undefined,
+        { timeout: 15000 },
+      );
       const main = await mainPage.evaluate(`(${colorProbe})()`);
       requireGate(main.skinLoaded, `${mode}: generated skin stylesheet did not load`);
       requireGate(main.scene.display !== "none" && main.scene.backgroundImage !== "none", `${mode}: main scene background is missing`);
-      requireGate(main.scene.worstCaseContrast >= 4.5, `${mode}: worst-case main scene contrast is below 4.5`);
+      requireGate(main.scene.wash === "rgba(0, 0, 0, 0)", `${mode}: a full-window scene wash is still active`);
+      requireGate(!main.scene.sceneFilter.includes("blur"), `${mode}: scene fidelity filter blurs the artwork`);
+      requireGate(main.scene.localProtection !== "none", `${mode}: local main-content protection is missing`);
+      requireGate(main.scene.semanticContrast >= 4.5, `${mode}: semantic main text contrast is below 4.5`);
       requireGate(main.sidebar.contrast >= 4.5, `${mode}: sidebar contrast is below 4.5`);
       requireGate(main.panelContrast >= 4.5, `${mode}: right panel contrast ${main.panelContrast.toFixed(2)} is below 4.5`);
       requireGate(main.primary.contrast >= 4.5, `${mode}: section primary contrast is below 4.5`);
@@ -218,11 +245,17 @@ async function run() {
       await mainPage.close();
 
       const overlayPage = await browser.newPage({ viewport: { width: 480, height: 360 }, deviceScaleFactor: 1 });
+      overlayPage.setDefaultTimeout(15000);
       const overlayUrl = new URL("/tests/fixtures/macos-harness/pet-overlay.html", origin);
       overlayUrl.searchParams.set("mode", mode);
       overlayUrl.searchParams.set("skin", skinUrl);
       overlayUrl.searchParams.set("pet", petUrl);
-      await overlayPage.goto(overlayUrl.toString(), { waitUntil: "networkidle" });
+      await overlayPage.goto(overlayUrl.toString(), { waitUntil: "domcontentloaded", timeout: 15000 });
+      await overlayPage.waitForFunction(
+        () => Boolean(document.querySelector('link[data-test-skin]')?.sheet),
+        undefined,
+        { timeout: 15000 },
+      );
       const overlay = await overlayPage.evaluate(`(${overlayProbe})()`);
       requireGate(overlay.skinLoaded, `${mode}: overlay skin stylesheet did not load`);
       requireGate(overlay.backgrounds.body === "rgba(0, 0, 0, 0)", `${mode}: pet body is not transparent`);

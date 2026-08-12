@@ -231,6 +231,30 @@
             },
             "depthLayers": {
               "const": ["atmosphere", "distant", "midground", "foreground"]
+            },
+            "visualTreatment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sceneFidelity",
+                "contentProtection",
+                "subjectPlacement",
+                "artworkRecomposed",
+                "globalWashOpacity"
+              ],
+              "properties": {
+                "sceneFidelity": {"const": "preserve"},
+                "contentProtection": {"const": "local-surfaces"},
+                "subjectPlacement": {
+                  "enum": ["source", "left", "right", "edge-balanced"]
+                },
+                "artworkRecomposed": {"type": "boolean"},
+                "globalWashOpacity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 0.12
+                }
+              }
             }
           }
         },
