@@ -394,7 +394,10 @@ class WindowsRuntimeTests(unittest.TestCase):
             endpoint.version.return_value = {"Browser": "Chrome/fixture"}
             monitor = mock.Mock(pid=303)
             monitor.poll.return_value = None
-            paths = {101: executable, 202: Path(sys.executable).resolve()}
+            # The runtime resolves executable paths before comparing process
+            # identity.  macOS temp directories commonly expose /var as a
+            # symlink to /private/var, so keep this fixture canonical too.
+            paths = {101: executable.resolve(), 202: Path(sys.executable).resolve()}
             with mock.patch("windows_runtime.build_preflight", return_value=preflight), mock.patch(
                 "windows_runtime.compile_skin", return_value=compiled
             ), mock.patch("windows_runtime.CdpEndpoint", return_value=endpoint), mock.patch(
