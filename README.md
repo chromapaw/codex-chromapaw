@@ -2,7 +2,7 @@
 
 Turn one uploaded image into an image-specific Codex skin or animated pet.
 
-> Version 0.4.5 adds separate reversible `Codex ChromaPaw` Desktop and Start Menu shortcuts that remember the last validated skin without replacing the application-managed ChatGPT entry. Package generation remains separate from live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
+> Version 0.4.6 hardens one-image generation handoffs, pet selection, hosted shortcuts, and Windows runtime recovery. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
 
 [中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Windows Runtime Beta](docs/WINDOWS_RUNTIME_BETA.md) · [macOS probe](docs/MACOS_COMPATIBILITY.md) · [Release checklist](docs/RELEASE_CHECKLIST.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -12,8 +12,8 @@ Turn one uploaded image into an image-specific Codex skin or animated pet.
 2. Ask for a **pet** or **skin**.
 3. ChromaPaw analyzes only that image and the current request.
 4. It creates a reviewable preview and a validated portable package.
-5. ChromaPaw reports `generated-not-installed` or `generated-not-active` and shows the exact separate confirmation phrase for the supported next step.
-6. Installation or live activation begins only after that confirmation; Windows skin activation still requires its later experimental-runtime acknowledgment after read-only preflight.
+5. ChromaPaw reports `generated-not-installed` or `generated-not-active` and shows the exact separate confirmation phrase only when that next step is supported on the current machine.
+6. Pet installation also selects the installed desktop pet after confirmation and reports whether reopening Codex may be required. Windows skin activation still requires its later experimental-runtime acknowledgment after read-only preflight.
 
 For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing the image's style, mood, identity cues, motifs, forbidden elements, four spatial depth descriptions, and safe-zone guidance. The four depth layers are composition slots, not a fixed beach template. A sky upload can use clouds and sunlight; comic art can use panels, halftone, and speed lines. Beach, waves, sand, or coral appear only when the upload or user request supports them. Prominent subjects that overlap the content safe zone are recomposed onto a side stage instead of being faded, blurred, or covered by a full-window wash.
 
@@ -23,12 +23,12 @@ For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing 
 | --- | --- | --- |
 | One-image skin package generation | Implemented | Platform-neutral implementation; real-Mac validation pending |
 | One-image pet package generation | Implemented with `hatch-pet` | Platform-neutral implementation; real-Mac validation pending |
-| Pet package validation/install/restore | Implemented | Implementation present; real-Mac validation pending |
+| Pet package validation/install/select/restore | Implemented; real-app visibility acceptance pending | Implementation present; real-Mac validation pending |
 | Live skin activation | Experimental, exact-version adapters only | Not implemented |
 | Skin relaunch after closing Codex | Explicit, reversible ChromaPaw Desktop and Start Menu shortcuts | Not implemented |
 | Compatibility discovery | Implemented | Read-only probe and enhanced cloud harness implemented |
 
-On the current Windows development machine, standalone Codex `26.707.9981.0` has an enabled experimental adapter. The official AppX `26.803.5235.0` is discoverable but activation remains disabled. Unknown versions fail closed.
+On the current Windows development machine, standalone Codex `26.707.9981.0` has an enabled experimental adapter. Recently discovered official AppX builds do not have an enabled adapter; the registry retains `26.803.5235.0` only as a historical disabled probe record. Unknown versions fail closed.
 
 ## Capabilities
 
@@ -51,15 +51,16 @@ On the current Windows development machine, standalone Codex `26.707.9981.0` has
 - Preserve the subject's silhouette, palette, face, clothing, and props.
 - Map working, waiting, ready, and failed intent onto supported Codex animation rows.
 - Build and visually validate an 8×11 desktop v2 atlas through a compatible installed `hatch-pet` workflow.
-- Refuse silent replacement, back up an existing matching id, and restore managed backups.
+- Refuse silent replacement, back up an existing matching id, safely select the installed desktop pet through a config backup, and restore managed backups.
 
 ### Runtime compatibility
 
 - `scripts/platform_capabilities.py --json` reports generation readiness, pet dependencies, and platform activation boundaries.
-- Non-environment skin uploads require Codex's image-generation capability for scene expansion; full environment uploads can proceed directly to deterministic packaging.
-- The Windows Runtime Beta validates an exact adapter and uses a temporary loopback-only runtime without editing `WindowsApps`, `app.asar`, or signed application files.
+- Skin uploads require Codex's image-generation capability when the upload is not a full environment or a salient subject overlaps the reading/input safe zone; safe full-environment uploads can proceed directly to deterministic packaging.
+- The Windows Runtime Beta validates an exact adapter, PE product metadata, signature policy, and a pinned executable identity before using a temporary loopback-only runtime without editing `WindowsApps`, `app.asar`, or signed application files.
 - A successful Windows activation remembers only package/executable/adapter identities and hashes. It never stores the session token or debugging port as a relaunch preference.
-- The optional Windows integration leaves `ChatGPT.lnk` untouched, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
+- Reviewed CSS-only updates use separate fail-closed paths: `refresh-active-css` for a healthy active session and `refresh-preference` for an inactive saved skin. Identity changes require a new activation review.
+- The optional Windows integration leaves `ChatGPT.lnk` untouched, hosts a verified content-addressed launcher/runtime copy outside the plugin cache, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
 - `scripts/audit_pets.py` reports valid v2, legacy v1, and invalid installed pets without changing any files.
 - The macOS probe reads bundle metadata and validates a package but cannot activate it. A separate enhanced GitHub Actions harness runs on Apple Silicon and Intel macOS runners, builds a real Skin Studio package, exercises pet installation/replacement/restore in a temporary Codex home, and captures simulated Codex renderer screenshots for the main window, right panel, and transparent pet overlay. It still does not test or claim activation in the signed, logged-in Codex app.
 
@@ -74,7 +75,7 @@ codex plugin add codex-chromapaw@chromapaw
 
 Restart Codex and open a new task so the three skills are discovered. Attach an image and invoke `$create-chromapaw-skin` or `$create-chromapaw-pet`.
 
-Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw checks this dependency and does not silently download or vendor it.
+Animated pet generation additionally requires a compatible `hatch-pet` skill. ChromaPaw validates the full preparation, atlas assembly, direction, preview, and blind-QA script contract; it does not silently download or vendor this external dependency. A clean ChromaPaw install therefore cannot generate pets until a compatible `hatch-pet` is available through the user's Codex distribution or `CHROMAPAW_HATCH_PET_DIR`.
 
 ### Update
 
@@ -88,6 +89,7 @@ Restart Codex and use a new task after updating.
 ### Release checks
 
 ```bash
+python -m pip install -r requirements-skin.txt -r requirements-dev.txt
 python scripts/release_check.py
 python scripts/audit_pets.py --json --allow-issues
 ```

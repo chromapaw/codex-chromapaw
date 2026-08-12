@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from pet_package import PetPackageError, ValidatedPetPackage, validate_pet_package
+from pet_selection import select_pet
 
 
 def resolve_codex_home(value: Path | None) -> Path:
@@ -50,6 +52,49 @@ def _remove_staging_dir(pets_root: Path, staging: Path) -> None:
         shutil.rmtree(resolved_staging)
 
 
+def _directory_content_identity(directory: Path) -> str:
+    """Return a deterministic identity for a regular, link-free directory tree."""
+
+    if _is_link_like(directory) or not directory.is_dir():
+        raise PetPackageError("installed pet destination is no longer a regular directory")
+
+    digest = hashlib.sha256()
+    entries = sorted(directory.rglob("*"), key=lambda path: path.relative_to(directory).as_posix())
+    for entry in entries:
+        relative = entry.relative_to(directory).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        if _is_link_like(entry):
+            raise PetPackageError("installed pet destination now contains a linked entry")
+        if entry.is_dir():
+            digest.update(b"D")
+            continue
+        if not entry.is_file():
+            raise PetPackageError("installed pet destination now contains a non-file entry")
+        digest.update(b"F")
+        before = entry.stat()
+        with entry.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        after = entry.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise PetPackageError("installed pet destination changed while it was inspected")
+
+    return digest.hexdigest()
+
+
+def _restore_claimed_destination(claimed: Path, destination: Path) -> Path:
+    """Put a claimed directory back when safe, or leave it preserved in place."""
+
+    if destination.exists():
+        return claimed
+    try:
+        claimed.replace(destination)
+    except OSError:
+        return claimed
+    return destination
+
+
 def _stage_package(package: ValidatedPetPackage, pets_root: Path) -> Path:
     staging = Path(tempfile.mkdtemp(prefix=".chromapaw-stage-", dir=pets_root))
     try:
@@ -74,6 +119,7 @@ def install_pet(
     *,
     replace: bool = False,
     backup_label: str | None = None,
+    select: bool = False,
 ) -> dict[str, Any]:
     errors, package = validate_pet_package(package_dir)
     if errors or package is None:
@@ -98,6 +144,7 @@ def install_pet(
     staging = _stage_package(package, pets_root)
     backup: Path | None = None
     try:
+        installed_identity = _directory_content_identity(staging)
         if destination.exists():
             backup_root = pets_root / ".chromapaw-backups"
             backup_root.mkdir(parents=True, exist_ok=True)
@@ -117,12 +164,69 @@ def install_pet(
     finally:
         _remove_staging_dir(pets_root, staging)
 
+    selection = None
+    if select:
+        try:
+            selection = select_pet(home, package.pet_id)
+        except Exception as selection_error:
+            rollback_candidate = Path(
+                tempfile.mkdtemp(prefix=".chromapaw-rollback-", dir=pets_root)
+            )
+            rollback_candidate.rmdir()
+            try:
+                destination.replace(rollback_candidate)
+            except OSError as claim_error:
+                backup_note = f"; previous package backup remains at {backup}" if backup else ""
+                raise PetPackageError(
+                    "pet selection failed and the installed destination could not be "
+                    "claimed for a safe rollback after a possible concurrent change; "
+                    f"preserved the partial install at {destination}{backup_note}; "
+                    f"claim error: {claim_error}; selection error: {selection_error}"
+                ) from selection_error
+
+            try:
+                current_identity = _directory_content_identity(rollback_candidate)
+            except (OSError, PetPackageError) as identity_error:
+                preserved_at = _restore_claimed_destination(
+                    rollback_candidate, destination
+                )
+                backup_note = f"; previous package backup remains at {backup}" if backup else ""
+                raise PetPackageError(
+                    "pet selection failed and the installed destination could not be "
+                    "safely identified after a possible concurrent change; preserved "
+                    f"the partial install at {preserved_at}{backup_note}; "
+                    f"identity error: {identity_error}; selection error: {selection_error}"
+                ) from selection_error
+            if current_identity != installed_identity:
+                preserved_at = _restore_claimed_destination(
+                    rollback_candidate, destination
+                )
+                backup_note = f"; previous package backup remains at {backup}" if backup else ""
+                raise PetPackageError(
+                    "pet selection failed and the installed destination changed "
+                    "concurrently; preserved the partial install at "
+                    f"{preserved_at}{backup_note}; selection error: {selection_error}"
+                ) from selection_error
+
+            shutil.rmtree(rollback_candidate)
+            if backup is not None and backup.exists():
+                if destination.exists():
+                    raise PetPackageError(
+                        "pet selection failed and a new destination appeared during "
+                        f"rollback; preserved it at {destination} and kept the previous "
+                        f"package backup at {backup}; selection error: {selection_error}"
+                    ) from selection_error
+                backup.replace(destination)
+            raise selection_error
+
     return {
         "ok": True,
         "id": package.pet_id,
         "destination": str(destination),
         "backup": str(backup) if backup is not None else None,
         "spriteVersionNumber": 2,
+        "selection": selection,
+        "restartMayBeRequired": bool(selection and selection.get("changed")),
     }
 
 
@@ -136,6 +240,11 @@ def main() -> int:
         help="Back up and replace an existing pet with the same id",
     )
     parser.add_argument("--json", action="store_true", help="Write a JSON result")
+    parser.add_argument(
+        "--select",
+        action="store_true",
+        help="Back up config.toml when needed and select the installed desktop pet",
+    )
     args = parser.parse_args()
 
     try:
@@ -143,6 +252,7 @@ def main() -> int:
             args.package.expanduser().resolve(),
             resolve_codex_home(args.codex_home),
             replace=args.replace,
+            select=args.select,
         )
     except (OSError, PetPackageError) as exc:
         if args.json:
@@ -157,6 +267,10 @@ def main() -> int:
         print(f"INSTALLED: {result['destination']}")
         if result["backup"]:
             print(f"BACKUP: {result['backup']}")
+        if result["selection"]:
+            print(f"SELECTED: {result['selection']['selectedAvatarId']}")
+            if result["restartMayBeRequired"]:
+                print("RESTART MAY BE REQUIRED: close and reopen Codex if the pet is not visible")
     return 0
 
 

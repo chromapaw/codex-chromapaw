@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "transport": {
     "kind": "electron-cdp-loopback",
     "host": "127.0.0.1",
@@ -15,6 +15,18 @@
       "appVersion": "26.707.9981.0",
       "executableName": "ChatGPT.exe",
       "activationEnabled": true,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "fileVersion": "150.0.7871.115",
+        "allowedSha256": ["28c3e8b6c55fff39ecb12a5eb27f493abf997804247517aa7a46c277ca5d9e93"],
+        "signature": {
+          "allowedStatuses": ["NotSigned"]
+        }
+      },
       "allowedTargetSchemes": ["app"],
       "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
       "testedTarget": "Managed standalone copy; isolated live activation, main/avatar verification, and restore passed on 2026-08-10"
@@ -24,6 +36,17 @@
       "appVersion": "26.803.5235.0",
       "executableName": "ChatGPT.exe",
       "activationEnabled": false,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "signature": {
+          "allowedStatuses": ["Valid"],
+          "signerSubjectContains": "OpenAI OpCo, LLC"
+        }
+      },
       "allowedTargetSchemes": ["app"],
       "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
       "testedTarget": "Official AppX discovered on 2026-08-10; protected-package direct launch rejected with WinError 5, so activation remains disabled"

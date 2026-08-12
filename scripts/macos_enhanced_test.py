@@ -316,7 +316,19 @@ def run(output: Path, *, force: bool, allow_non_darwin: bool) -> dict[str, Any]:
         "--output",
         str(visual_dir),
     ]
-    completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise EnhancedMacTestFailure(
+            "visual smoke test timed out after 120 seconds"
+        ) from exc
     if completed.returncode != 0:
         raise EnhancedMacTestFailure(
             "visual smoke test failed: " + (completed.stderr.strip() or completed.stdout.strip())

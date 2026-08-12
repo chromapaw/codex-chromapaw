@@ -34,9 +34,14 @@ from windows_runtime import (  # noqa: E402
     refresh_active_runtime_css,
     refresh_preference_for_runtime_update,
     remember_preference,
+    runtime_lock,
+    runtime_status,
     resume_runtime,
+    restore_runtime,
     restore_allowlisted_config,
     select_adapter,
+    _process_identity_status,
+    _terminate_process_tree,
 )
 try:
     from tests.test_validate_skin_package import make_v2_package  # type: ignore  # noqa: E402
@@ -47,6 +52,32 @@ except ImportError:
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xn4XAAAAAElFTkSuQmCC"
 )
+
+STANDALONE_EXECUTABLE_IDENTITY = {
+    "fileVersion": "150.0.7871.115",
+    "productVersion": "150.0.7871.115",
+    "productName": "Codex",
+    "companyName": "OpenAI OpCo, LLC",
+    "fileDescription": "Codex",
+    "originalFilename": "chrome.exe",
+    "internalName": "chrome_exe",
+    "signatureStatus": "NotSigned",
+    "signerSubject": None,
+    "sha256": "28c3e8b6c55fff39ecb12a5eb27f493abf997804247517aa7a46c277ca5d9e93",
+}
+
+APPX_EXECUTABLE_IDENTITY = {
+    "fileVersion": "151.0.7922.76",
+    "productVersion": "151.0.7922.76",
+    "productName": "Codex",
+    "companyName": "OpenAI OpCo, LLC",
+    "fileDescription": "Codex",
+    "originalFilename": "chrome.exe",
+    "internalName": "chrome_exe",
+    "signatureStatus": "Valid",
+    "signerSubject": 'CN="OpenAI OpCo, LLC", O="OpenAI OpCo, LLC", C=US',
+    "sha256": "0" * 64,
+}
 
 
 def _read_exact(stream: socket.socket, length: int) -> bytes:
@@ -225,6 +256,58 @@ class FakeCdpServer(socketserver.ThreadingTCPServer):
 
 
 class WindowsRuntimeTests(unittest.TestCase):
+    def test_runtime_lock_ignores_leftover_metadata_after_owner_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            lock = data_dir / ".runtime.lock"
+            lock.write_text("pid=999999 time=old\n", encoding="utf-8")
+            with runtime_lock(data_dir):
+                self.assertTrue(lock.is_file())
+            self.assertIn(f"pid={os.getpid()}", lock.read_text(encoding="utf-8"))
+            with runtime_lock(data_dir):
+                self.assertTrue(lock.is_file())
+
+    def test_runtime_lock_rejects_concurrent_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            with runtime_lock(data_dir):
+                with self.assertRaises(RuntimeFailure) as context:
+                    with runtime_lock(data_dir):
+                        pass
+            self.assertIn("another ChromaPaw runtime operation", str(context.exception))
+
+    def test_process_identity_rejects_pid_reuse_at_same_path(self) -> None:
+        executable = Path("C:/fixture/app-26.707.9981.0/ChatGPT.exe").resolve()
+        with mock.patch(
+            "windows_runtime._windows_process_paths", return_value={101: executable}
+        ), mock.patch(
+            "windows_runtime._windows_process_creation_times", return_value={101: 222}
+        ), mock.patch("windows_runtime.sha256_file", return_value="a" * 64):
+            identity = _process_identity_status(101, str(executable), 111, "a" * 64)
+        self.assertTrue(identity["pathMatches"])
+        self.assertFalse(identity["creationTimeMatches"])
+        self.assertFalse(identity["matches"])
+
+    def test_process_termination_refuses_pid_reuse_at_same_path(self) -> None:
+        executable = Path("C:/fixture/app-26.707.9981.0/ChatGPT.exe").resolve()
+        with mock.patch(
+            "windows_runtime._windows_process_paths", return_value={101: executable}
+        ), mock.patch(
+            "windows_runtime._windows_process_creation_times", return_value={101: 222}
+        ), mock.patch("windows_runtime.sha256_file", return_value="a" * 64), mock.patch(
+            "windows_runtime.subprocess.run"
+        ) as taskkill:
+            with self.assertRaises(RuntimeFailure) as context:
+                _terminate_process_tree(
+                    101,
+                    str(executable),
+                    label="Codex",
+                    creation_time=111,
+                    executable_hash="a" * 64,
+                )
+        taskkill.assert_not_called()
+        self.assertIn("creationTimeMatches", str(context.exception))
+
     def test_close_matching_codex_requires_explicit_confirmation(self) -> None:
         with self.assertRaises(RuntimeFailure) as context:
             close_matching_codex_processes(
@@ -299,9 +382,7 @@ class WindowsRuntimeTests(unittest.TestCase):
             }
             remember_preference(data_dir, state)
             preflight = {**state, "cssHash": "e" * 64}
-            with mock.patch(
-                "windows_runtime.runtime_status", return_value={"ok": True, "status": "inactive"}
-            ), mock.patch("windows_runtime.build_preflight", return_value=preflight):
+            with mock.patch("windows_runtime.build_preflight", return_value=preflight):
                 result = refresh_preference_for_runtime_update(
                     data_dir,
                     ROOT / "runtime" / "windows-adapters.json",
@@ -329,9 +410,7 @@ class WindowsRuntimeTests(unittest.TestCase):
             }
             remember_preference(data_dir, state)
             preflight = {**state, "manifestHash": "f" * 64, "cssHash": "e" * 64}
-            with mock.patch(
-                "windows_runtime.runtime_status", return_value={"ok": True, "status": "inactive"}
-            ), mock.patch("windows_runtime.build_preflight", return_value=preflight):
+            with mock.patch("windows_runtime.build_preflight", return_value=preflight):
                 with self.assertRaises(RuntimeFailure) as context:
                     refresh_preference_for_runtime_update(
                         data_dir,
@@ -341,6 +420,37 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertIn("manifestHash", str(context.exception))
             saved = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["cssHash"], "b" * 64)
+
+    def test_refresh_preference_rejects_any_active_state_while_holding_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            (data_dir / "active.json").write_text(
+                json.dumps({"schemaVersion": 1, "sessionId": "stale-session"}),
+                encoding="utf-8",
+            )
+            with mock.patch("windows_runtime.build_preflight") as preflight, mock.patch(
+                "windows_runtime.remember_preference"
+            ) as remember:
+                with self.assertRaises(RuntimeFailure) as context:
+                    refresh_preference_for_runtime_update(
+                        data_dir,
+                        ROOT / "runtime" / "windows-adapters.json",
+                        acknowledged=True,
+                    )
+            preflight.assert_not_called()
+            remember.assert_not_called()
+            self.assertIn("active runtime session", str(context.exception))
+
+    def test_refresh_preference_obeys_runtime_operation_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            with runtime_lock(data_dir):
+                with self.assertRaises(RuntimeFailure) as context:
+                    refresh_preference_for_runtime_update(
+                        data_dir,
+                        acknowledged=True,
+                    )
+            self.assertIn("another ChromaPaw runtime operation", str(context.exception))
 
     def test_refresh_active_runtime_css_requires_acknowledgement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -389,7 +499,11 @@ class WindowsRuntimeTests(unittest.TestCase):
                 **state,
                 "cssHash": "e" * 64,
             }
-            compiled = {"css": "body { color: white; }", "cssHash": "e" * 64}
+            compiled = {
+                "css": "body { color: white; }",
+                "cssHash": "e" * 64,
+                "manifest": {"id": "fixture-skin"},
+            }
             endpoint = mock.Mock()
             endpoint.version.return_value = {"Browser": "Chrome/fixture"}
             monitor = mock.Mock(pid=303)
@@ -403,11 +517,17 @@ class WindowsRuntimeTests(unittest.TestCase):
             ), mock.patch("windows_runtime.CdpEndpoint", return_value=endpoint), mock.patch(
                 "windows_runtime._adapter_for_state", return_value={"id": "fixture-adapter"}
             ), mock.patch("windows_runtime._validate_browser_identity"), mock.patch(
-                "windows_runtime._windows_process_paths", return_value=paths
+                "windows_runtime._process_identity_status",
+                side_effect=[{"matches": True}, {"matches": True, "running": True}],
+            ), mock.patch(
+                "windows_runtime._snapshot_runtime_css",
+                return_value={"css": "old css", "cssHash": "b" * 64},
             ), mock.patch("windows_runtime._terminate_monitor_process") as terminate, mock.patch(
                 "windows_runtime.inject_until_ready",
                 return_value=[{"targetId": "fixture", "result": {"applied": True}}],
-            ), mock.patch("windows_runtime._launch_monitor", return_value=monitor):
+            ), mock.patch("windows_runtime._launch_monitor", return_value=monitor), mock.patch(
+                "windows_runtime._record_process_creation_time", return_value=333
+            ):
                 result = refresh_active_runtime_css(
                     data_dir,
                     adapters,
@@ -423,6 +543,242 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertEqual(saved["cssHash"], "e" * 64)
             self.assertEqual(saved["monitorPid"], 303)
             self.assertEqual(preferred["cssHash"], "e" * 64)
+
+    def test_refresh_active_runtime_css_rolls_back_when_monitor_restart_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            package = root / "skin"
+            package.mkdir()
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture-app")
+            adapters = ROOT / "runtime" / "windows-adapters.json"
+            state = {
+                "schemaVersion": 1,
+                "runtimeVersion": "0.4.7",
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "status": "active",
+                "pid": 101,
+                "executable": str(executable),
+                "executableHash": hashlib.sha256(b"fixture-app").hexdigest(),
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(adapters),
+                "adapterFileHash": "d" * 64,
+                "port": 12345,
+                "allowedTargetSchemes": ["app"],
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "backupDir": str(backup_dir),
+                "monitorPid": 202,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": "f" * 64,
+            }
+            (data_dir / "active.json").write_text(json.dumps(state), encoding="utf-8")
+            preflight = {**state, "cssHash": "e" * 64}
+            compiled = {
+                "css": "new css",
+                "cssHash": "e" * 64,
+                "manifest": {"id": "fixture-skin"},
+            }
+            previous = {"css": "old css", "cssHash": "b" * 64}
+            endpoint = mock.Mock()
+            endpoint.version.return_value = {"Browser": "Chrome/fixture"}
+            failed_monitor = mock.Mock(pid=303)
+            failed_monitor.poll.return_value = 1
+            restored_monitor = mock.Mock(pid=404)
+            with mock.patch("windows_runtime.build_preflight", return_value=preflight), mock.patch(
+                "windows_runtime.compile_skin", return_value=compiled
+            ), mock.patch("windows_runtime.CdpEndpoint", return_value=endpoint), mock.patch(
+                "windows_runtime._adapter_for_state", return_value={"id": "fixture-adapter"}
+            ), mock.patch("windows_runtime._validate_browser_identity"), mock.patch(
+                "windows_runtime._process_identity_status",
+                side_effect=[{"matches": True}, {"matches": True, "running": True}],
+            ), mock.patch(
+                "windows_runtime._snapshot_runtime_css", return_value=previous
+            ), mock.patch("windows_runtime._terminate_monitor_process"), mock.patch(
+                "windows_runtime.inject_until_ready",
+                return_value=[{"targetId": "fixture", "result": {"applied": True}}],
+            ), mock.patch("windows_runtime._rollback_css_refresh") as rollback, mock.patch(
+                "windows_runtime._launch_monitor",
+                side_effect=[failed_monitor, restored_monitor],
+            ), mock.patch("windows_runtime._record_process_creation_time", return_value=444):
+                with self.assertRaises(RuntimeFailure) as context:
+                    refresh_active_runtime_css(data_dir, adapters, acknowledged=True)
+            rollback.assert_called_once_with(
+                endpoint,
+                previous,
+                "e" * 64,
+                "fixture-token",
+                {"app"},
+            )
+            saved = json.loads((data_dir / "active.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["cssHash"], "b" * 64)
+            self.assertEqual(saved["monitorPid"], 404)
+            self.assertIn("rolled back", str(context.exception))
+
+    def _assert_refresh_write_failure_rolls_back(self, failure_index: int) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            package = root / "skin"
+            package.mkdir()
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture-app")
+            adapters = ROOT / "runtime" / "windows-adapters.json"
+            state = {
+                "schemaVersion": 1,
+                "runtimeVersion": "0.4.7",
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "status": "active",
+                "pid": 101,
+                "executable": str(executable),
+                "executableHash": hashlib.sha256(b"fixture-app").hexdigest(),
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(adapters),
+                "adapterFileHash": "d" * 64,
+                "port": 12345,
+                "allowedTargetSchemes": ["app"],
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "backupDir": str(backup_dir),
+                "monitorPid": 202,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": "f" * 64,
+            }
+            old_bytes = (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            (data_dir / "active.json").write_bytes(old_bytes)
+            (backup_dir / "active.json").write_bytes(old_bytes)
+            old_preference = b'{"old":true}\n'
+            (data_dir / "preferred-skin.json").write_bytes(old_preference)
+            (backup_dir / "preferred-skin.json").write_bytes(old_preference)
+            compiled = {"css": "new css", "cssHash": "e" * 64}
+            preflight = {**state, "cssHash": "e" * 64}
+            previous = {"css": "old css", "cssHash": "b" * 64}
+            endpoint = mock.Mock()
+            endpoint.version.return_value = {"Browser": "Chrome/fixture"}
+            new_monitor = mock.Mock(pid=303)
+            new_monitor.poll.return_value = None
+            restored_monitor = mock.Mock(pid=404)
+
+            import windows_runtime
+
+            original_atomic_json = windows_runtime.atomic_json
+            call_count = 0
+
+            def fail_selected_write(path: Path, value: object) -> None:
+                nonlocal call_count
+                call_count += 1
+                if call_count == failure_index:
+                    raise OSError(f"fixture write failure {failure_index}")
+                original_atomic_json(path, value)
+
+            with mock.patch("windows_runtime.build_preflight", return_value=preflight), mock.patch(
+                "windows_runtime.compile_skin", return_value=compiled
+            ), mock.patch("windows_runtime.CdpEndpoint", return_value=endpoint), mock.patch(
+                "windows_runtime._adapter_for_state", return_value={"id": "fixture-adapter"}
+            ), mock.patch("windows_runtime._validate_browser_identity"), mock.patch(
+                "windows_runtime._process_identity_status",
+                side_effect=[{"matches": True}, {"matches": True, "running": True}],
+            ), mock.patch("windows_runtime._snapshot_runtime_css", return_value=previous), mock.patch(
+                "windows_runtime._terminate_monitor_process"
+            ), mock.patch(
+                "windows_runtime.inject_until_ready",
+                return_value=[{"targetId": "fixture", "result": {"applied": True}}],
+            ), mock.patch("windows_runtime._rollback_css_refresh") as rollback, mock.patch(
+                "windows_runtime._launch_monitor", side_effect=[new_monitor, restored_monitor]
+            ), mock.patch(
+                "windows_runtime._record_process_creation_time", return_value=444
+            ), mock.patch("windows_runtime.atomic_json", side_effect=fail_selected_write):
+                with self.assertRaises(RuntimeFailure) as context:
+                    refresh_active_runtime_css(data_dir, adapters, acknowledged=True)
+            rollback.assert_called_once()
+            saved = json.loads((data_dir / "active.json").read_text(encoding="utf-8"))
+            backup_saved = json.loads((backup_dir / "active.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["cssHash"], "b" * 64)
+            self.assertEqual(saved["monitorPid"], 404)
+            self.assertEqual(backup_saved, saved)
+            self.assertEqual((data_dir / "preferred-skin.json").read_bytes(), old_preference)
+            self.assertEqual((backup_dir / "preferred-skin.json").read_bytes(), old_preference)
+            self.assertIn("rolled back", str(context.exception))
+
+    def test_refresh_active_css_rolls_back_on_active_state_write_failure(self) -> None:
+        self._assert_refresh_write_failure_rolls_back(1)
+
+    def test_refresh_active_css_rolls_back_on_backup_state_write_failure(self) -> None:
+        self._assert_refresh_write_failure_rolls_back(2)
+
+    def test_refresh_active_css_rolls_back_on_preference_write_failure(self) -> None:
+        self._assert_refresh_write_failure_rolls_back(3)
+
+    def test_runtime_status_requires_process_adapter_browser_and_style_continuity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            executable = data_dir / "ChatGPT.exe"
+            executable.write_bytes(b"fixture")
+            adapter_file = data_dir / "adapters.json"
+            adapter_file.write_text("{}", encoding="utf-8")
+            package = data_dir / "skin"
+            package.mkdir()
+            manifest = package / "skin.json"
+            manifest.write_text("{}", encoding="utf-8")
+            state = {
+                "schemaVersion": 1,
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "pid": 101,
+                "processCreationTime": 111,
+                "executable": str(executable),
+                "executableHash": hashlib.sha256(b"fixture").hexdigest(),
+                "monitorPid": 202,
+                "monitorCreationTime": 222,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest(),
+                "port": 12345,
+                "adapterFile": str(adapter_file),
+                "adapterFileHash": hashlib.sha256(b"{}").hexdigest(),
+                "adapterId": "fixture-adapter",
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": hashlib.sha256(b"{}").hexdigest(),
+                "cssHash": "a" * 64,
+                "allowedTargetSchemes": ["app"],
+                "appVersion": "26.707.9981.0",
+            }
+            (data_dir / "active.json").write_text(json.dumps(state), encoding="utf-8")
+            endpoint = mock.Mock()
+            endpoint.version.return_value = {"Browser": "Chrome/fixture"}
+            checks = [{"targetId": "fixture", "result": {"matches": True}}]
+            with mock.patch(
+                "windows_runtime._process_identity_status",
+                side_effect=[{"matches": True}, {"matches": True}],
+            ), mock.patch(
+                "windows_runtime.compile_skin", return_value={"cssHash": "a" * 64}
+            ), mock.patch(
+                "windows_runtime.CdpEndpoint", return_value=endpoint
+            ), mock.patch(
+                "windows_runtime._adapter_for_state", return_value={"id": "fixture-adapter"}
+            ), mock.patch("windows_runtime._validate_browser_identity"), mock.patch(
+                "windows_runtime.verify_css", return_value=checks
+            ):
+                result = runtime_status(data_dir)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["status"], "active")
+            self.assertTrue(all(result["continuity"].values()))
+            self.assertEqual(result["targets"], checks)
 
     def test_resume_returns_without_relaunch_for_matching_healthy_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -447,11 +803,13 @@ class WindowsRuntimeTests(unittest.TestCase):
             )
             active = {
                 "schemaVersion": 1,
+                "sessionId": "fixture-session",
                 "package": str(package),
                 "executable": str(executable),
             }
             (data_dir / "active.json").write_text(json.dumps(active), encoding="utf-8")
             healthy = {"ok": True, "status": "active", "packageId": "fixture-skin"}
+            healthy["sessionId"] = "fixture-session"
             with mock.patch("windows_runtime.runtime_status", return_value=healthy), mock.patch(
                 "windows_runtime.activate_runtime"
             ) as activate:
@@ -483,7 +841,8 @@ class WindowsRuntimeTests(unittest.TestCase):
                 json.dumps(preference), encoding="utf-8"
             )
             (data_dir / "active.json").write_text(
-                json.dumps({"schemaVersion": 1}), encoding="utf-8"
+                json.dumps({"schemaVersion": 1, "sessionId": "fixture-session"}),
+                encoding="utf-8",
             )
             preflight = {
                 "executableHash": preference["executableHash"],
@@ -495,18 +854,273 @@ class WindowsRuntimeTests(unittest.TestCase):
             }
             activated = {"ok": True, "status": "active", "packageId": "fixture-skin"}
             with mock.patch(
-                "windows_runtime.runtime_status", return_value={"ok": False, "status": "stale"}
+                "windows_runtime.runtime_status",
+                return_value={
+                    "ok": False,
+                    "status": "stale",
+                    "sessionId": "fixture-session",
+                },
             ), mock.patch("windows_runtime.restore_runtime", return_value={"status": "restored"}) as restore, mock.patch(
                 "windows_runtime.build_preflight", return_value=preflight
             ), mock.patch("windows_runtime.activate_runtime", return_value=activated) as activate:
                 result = resume_runtime(
                     data_dir, adapters, acknowledged=True, wait_seconds=4.0
                 )
-            restore.assert_called_once_with(data_dir, operation="restore")
+            restore.assert_called_once_with(
+                data_dir,
+                operation="restore",
+                expected_session_id=mock.ANY,
+            )
             activate.assert_called_once()
             self.assertTrue(result["resumed"])
             self.assertTrue(result["staleSessionRecovered"])
             self.assertTrue(all(result["continuity"].values()))
+
+    def test_resume_restore_is_guarded_by_the_observed_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            package = data_dir / "skin"
+            executable = data_dir / "app-26.707.9981.0" / "ChatGPT.exe"
+            adapters = ROOT / "runtime" / "windows-adapters.json"
+            preference = {
+                "schemaVersion": 1,
+                "package": str(package),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(executable),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(adapters),
+                "adapterFileHash": "d" * 64,
+            }
+            (data_dir / "preferred-skin.json").write_text(
+                json.dumps(preference), encoding="utf-8"
+            )
+            (data_dir / "active.json").write_text(
+                json.dumps({"schemaVersion": 1, "sessionId": "observed-session"}),
+                encoding="utf-8",
+            )
+            with mock.patch(
+                "windows_runtime.runtime_status",
+                return_value={
+                    "ok": False,
+                    "status": "stale",
+                    "sessionId": "observed-session",
+                },
+            ), mock.patch(
+                "windows_runtime.restore_runtime", return_value={"status": "restored"}
+            ) as restore, mock.patch(
+                "windows_runtime.build_preflight", return_value=preference
+            ), mock.patch(
+                "windows_runtime.activate_runtime", return_value={"status": "active"}
+            ):
+                resume_runtime(data_dir, adapters, acknowledged=True)
+            restore.assert_called_once_with(
+                data_dir,
+                operation="restore",
+                expected_session_id="observed-session",
+            )
+
+    def test_resume_rejects_session_change_between_status_and_state_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            preference = {
+                "schemaVersion": 1,
+                "package": str(data_dir / "skin"),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+                "executable": str(data_dir / "ChatGPT.exe"),
+                "executableHash": "c" * 64,
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+            }
+            (data_dir / "preferred-skin.json").write_text(
+                json.dumps(preference), encoding="utf-8"
+            )
+            (data_dir / "active.json").write_text(
+                json.dumps({"schemaVersion": 1, "sessionId": "replacement-session"}),
+                encoding="utf-8",
+            )
+            with mock.patch(
+                "windows_runtime.runtime_status",
+                return_value={
+                    "ok": False,
+                    "status": "stale",
+                    "sessionId": "observed-session",
+                },
+            ), mock.patch("windows_runtime.restore_runtime") as restore:
+                with self.assertRaises(RuntimeFailure) as context:
+                    resume_runtime(data_dir, acknowledged=True)
+            restore.assert_not_called()
+            self.assertIn("session changed", str(context.exception))
+
+    def test_restore_expected_session_guard_runs_before_process_or_css_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            (data_dir / "active.json").write_text(
+                json.dumps(
+                    {"schemaVersion": 1, "sessionId": "replacement-session"}
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch(
+                "windows_runtime._terminate_monitor_process"
+            ) as terminate_monitor, mock.patch(
+                "windows_runtime.remove_css"
+            ) as remove, mock.patch(
+                "windows_runtime._terminate_runtime_process"
+            ) as terminate_codex:
+                with self.assertRaises(RuntimeFailure) as context:
+                    restore_runtime(
+                        data_dir,
+                        expected_session_id="observed-session",
+                    )
+            terminate_monitor.assert_not_called()
+            remove.assert_not_called()
+            terminate_codex.assert_not_called()
+            self.assertIn("session changed", str(context.exception))
+
+    def _assert_activation_write_failure_is_fully_compensated(
+        self, failure_index: int
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            package = root / "skin"
+            package.mkdir()
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture")
+            preference_before = b'{"preferred":"before"}\n'
+            backup_preference_before = b'{"backupPreferred":"before"}\n'
+            (data_dir / "preferred-skin.json").write_bytes(preference_before)
+            (backup_dir / "preferred-skin.json").write_bytes(
+                backup_preference_before
+            )
+            preflight = {
+                "runningPids": [],
+                "executable": str(executable.resolve()),
+                "executableHash": hashlib.sha256(b"fixture").hexdigest(),
+                "appVersion": "26.707.9981.0",
+                "adapterId": "fixture-adapter",
+                "adapterFile": str(ROOT / "runtime" / "windows-adapters.json"),
+                "adapterFileHash": "d" * 64,
+                "package": str(package.resolve()),
+                "packageId": "fixture-skin",
+                "manifestHash": "a" * 64,
+                "cssHash": "b" * 64,
+            }
+            compiled = {"css": "fixture css", "cssHash": "b" * 64}
+            process = mock.Mock(pid=101)
+            process.poll.return_value = None
+            monitor = mock.Mock(pid=202)
+            monitor.poll.return_value = None
+
+            import windows_runtime
+
+            original_atomic_json = windows_runtime.atomic_json
+            call_count = 0
+
+            def fail_selected_write(path: Path, value: object) -> None:
+                nonlocal call_count
+                call_count += 1
+                if call_count == failure_index:
+                    raise OSError(f"fixture activation write failure {failure_index}")
+                original_atomic_json(path, value)
+
+            with mock.patch(
+                "windows_runtime.build_preflight", return_value=preflight
+            ), mock.patch(
+                "windows_runtime.compile_skin", return_value=compiled
+            ), mock.patch(
+                "windows_runtime.select_adapter",
+                return_value={"allowedTargetSchemes": ["app"]},
+            ), mock.patch(
+                "windows_runtime.create_backup",
+                return_value={"backupDir": str(backup_dir)},
+            ), mock.patch(
+                "windows_runtime.choose_ephemeral_port", return_value=12345
+            ), mock.patch(
+                "windows_runtime._launch_codex", return_value=process
+            ), mock.patch(
+                "windows_runtime.wait_for_endpoint",
+                return_value={"Browser": "Chrome/fixture"},
+            ), mock.patch(
+                "windows_runtime.inject_until_ready",
+                return_value=[{"targetId": "fixture", "result": {"applied": True}}],
+            ), mock.patch(
+                "windows_runtime._record_process_creation_time",
+                side_effect=[111, 222],
+            ), mock.patch(
+                "windows_runtime._launch_monitor", return_value=monitor
+            ), mock.patch(
+                "windows_runtime._terminate_monitor_process"
+            ) as terminate_monitor, mock.patch(
+                "windows_runtime._terminate_runtime_process"
+            ) as terminate_codex, mock.patch(
+                "windows_runtime.remove_css"
+            ) as remove, mock.patch(
+                "windows_runtime._config_backup_status",
+                return_value={"unchanged": True},
+            ), mock.patch(
+                "windows_runtime.atomic_json", side_effect=fail_selected_write
+            ):
+                with self.assertRaises(RuntimeFailure) as context:
+                    activate_runtime(
+                        package,
+                        executable,
+                        data_dir,
+                        ROOT / "runtime" / "windows-adapters.json",
+                        acknowledged=True,
+                        profile_dir=None,
+                        allow_parallel_profile=False,
+                        wait_seconds=1.0,
+                    )
+            self.assertFalse((data_dir / "active.json").exists())
+            self.assertFalse((backup_dir / "active.json").exists())
+            self.assertEqual(
+                (data_dir / "preferred-skin.json").read_bytes(), preference_before
+            )
+            self.assertEqual(
+                (backup_dir / "preferred-skin.json").read_bytes(),
+                backup_preference_before,
+            )
+            remove.assert_called_once()
+            terminate_codex.assert_called_once()
+            if failure_index >= 3:
+                terminate_monitor.assert_called_once()
+            else:
+                terminate_monitor.assert_not_called()
+            self.assertIn("rolled back", str(context.exception))
+            failure = json.loads(
+                (backup_dir / "failure.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(failure["status"], "activation-failed")
+
+    def test_activation_rolls_back_initial_active_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(1)
+
+    def test_activation_rolls_back_initial_backup_active_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(2)
+
+    def test_activation_rolls_back_monitored_active_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(3)
+
+    def test_activation_rolls_back_monitored_backup_active_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(4)
+
+    def test_activation_rolls_back_global_preference_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(5)
+
+    def test_activation_rolls_back_backup_preference_write_failure(self) -> None:
+        self._assert_activation_write_failure_is_fully_compensated(6)
 
     def test_cdp_inject_verify_remove_lifecycle(self) -> None:
         with FakeCdpServer() as server:
@@ -553,11 +1167,59 @@ class WindowsRuntimeTests(unittest.TestCase):
             executable = Path(temporary) / "app-26.803.5235.0" / "ChatGPT.exe"
             executable.parent.mkdir()
             executable.write_bytes(b"fixture")
-            adapter = select_adapter(executable, require_enabled=False)
+            adapter = select_adapter(
+                executable,
+                require_enabled=False,
+                _identity_probe=lambda _path: APPX_EXECUTABLE_IDENTITY,
+            )
             self.assertFalse(adapter["activationEnabled"])
             with self.assertRaises(RuntimeFailure) as context:
                 select_adapter(executable)
             self.assertIn("activation is disabled", str(context.exception))
+
+    def test_matching_path_without_matching_pe_identity_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"renamed unrelated executable")
+            impostor = {
+                **STANDALONE_EXECUTABLE_IDENTITY,
+                "productName": "Unrelated App",
+                "sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+            }
+            with self.assertRaises(RuntimeFailure) as context:
+                select_adapter(executable, _identity_probe=lambda _path: impostor)
+            self.assertIn("rejected the executable identity", str(context.exception))
+            self.assertIn("productName", str(context.exception))
+            self.assertIn("sha256", str(context.exception))
+
+    def test_matching_explicit_pe_identity_selects_enabled_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture")
+            adapter = select_adapter(
+                executable,
+                _identity_probe=lambda _path: STANDALONE_EXECUTABLE_IDENTITY,
+            )
+            self.assertEqual(adapter["id"], "chatgpt-electron-26-707-9981")
+            self.assertEqual(
+                adapter["verifiedExecutableIdentity"]["productName"], "Codex"
+            )
+
+    def test_enabled_adapter_requires_strong_identity_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "adapters.json"
+            registry = json.loads(
+                (ROOT / "runtime" / "windows-adapters.json").read_text(encoding="utf-8")
+            )
+            identity = registry["adapters"][0]["executableIdentity"]
+            identity.pop("allowedSha256")
+            identity.pop("fileVersion")
+            path.write_text(json.dumps(registry), encoding="utf-8")
+            with self.assertRaises(RuntimeFailure) as context:
+                load_adapters(path)
+            self.assertIn("must pin an executable hash", str(context.exception))
 
     def test_adapter_registry_rejects_non_loopback_transport(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -607,6 +1269,9 @@ class WindowsRuntimeTests(unittest.TestCase):
             config = codex_home / "config.toml"
             config.write_text("model = 'fixture'\n", encoding="utf-8")
             with mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}), mock.patch(
+                "windows_runtime.probe_executable_identity",
+                return_value=STANDALONE_EXECUTABLE_IDENTITY,
+            ), mock.patch(
                 "windows_runtime._launch_codex",
                 side_effect=RuntimeFailure("fixture launch denied"),
             ):
@@ -684,12 +1349,16 @@ class WindowsRuntimeTests(unittest.TestCase):
             active_path = data_dir / "active.json"
             active_path.write_text(json.dumps(active), encoding="utf-8")
             result: list[int] = []
-            thread = threading.Thread(
-                target=lambda: result.append(
-                    monitor_runtime(data_dir, "fixture-session", interval=0.1)
-                ),
-                daemon=True,
-            )
+            def run_monitor() -> None:
+                with mock.patch(
+                    "windows_runtime.probe_executable_identity",
+                    return_value=STANDALONE_EXECUTABLE_IDENTITY,
+                ):
+                    result.append(
+                        monitor_runtime(data_dir, "fixture-session", interval=0.1)
+                    )
+
+            thread = threading.Thread(target=run_monitor, daemon=True)
             thread.start()
             deadline = time.monotonic() + 4
             while time.monotonic() < deadline and not server.fixture_state.present:

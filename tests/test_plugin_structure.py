@@ -12,8 +12,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.5")
-        self.assertRegex(manifest["version"], r"^0\.4\.5(?:\+codex\.[0-9a-z-]+)?$")
+        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.6")
+        self.assertRegex(manifest["version"], r"^0\.4\.6(?:\+codex\.[0-9a-z-]+)?$")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -44,6 +44,7 @@ class PluginStructureTests(unittest.TestCase):
             "scripts/prepare_pet_request.py",
             "scripts/validate_pet_package.py",
             "scripts/install_pet.py",
+            "scripts/pet_selection.py",
             "scripts/restore_pet.py",
             "scripts/check_dependencies.py",
             "scripts/audit_pets.py",
@@ -125,6 +126,7 @@ class PluginStructureTests(unittest.TestCase):
         expected = (
             ".github/workflows/ci.yml",
             "scripts/release_check.py",
+            "requirements-dev.txt",
             "docs/RELEASE_CHECKLIST.md",
             "tests/test_audit_pets.py",
             "tests/test_skin_input_matrix.py",

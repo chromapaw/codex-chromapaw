@@ -10,6 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
@@ -17,6 +21,22 @@ SKILLS = (
     "create-chromapaw-pet",
     "create-chromapaw-skin",
     "manage-chromapaw",
+)
+SCHEMA_CONTRACTS = (
+    ("schemas/pet.schema.json", "tests/fixtures/schema/pet.json"),
+    ("schemas/skin.schema.json", "tests/fixtures/schema/skin.json"),
+    (
+        "schemas/theme-profile.schema.json",
+        "tests/fixtures/schema/theme-profile.json",
+    ),
+    (
+        "schemas/windows-runtime-adapters.schema.json",
+        "runtime/windows-adapters.json",
+    ),
+    (
+        "schemas/macos-runtime-adapters.schema.json",
+        "runtime/macos-adapters.json",
+    ),
 )
 
 
@@ -30,6 +50,47 @@ def _load_json(relative: str) -> object:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ReleaseCheckError(f"{relative} is not valid UTF-8 JSON: {exc}") from exc
+
+
+def _json_path(parts: object) -> str:
+    rendered = "$"
+    for part in parts:
+        rendered += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return rendered
+
+
+def _validate_schema_value(
+    schema: object,
+    instance: object,
+    *,
+    schema_name: str,
+    instance_name: str,
+) -> None:
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        raise ReleaseCheckError(f"{schema_name} is not a valid JSON Schema: {exc.message}") from exc
+    validator = Draft202012Validator(schema)
+    errors = sorted(
+        validator.iter_errors(instance),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if errors:
+        error = errors[0]
+        raise ReleaseCheckError(
+            f"{instance_name} violates {schema_name} at "
+            f"{_json_path(error.absolute_path)}: {error.message}"
+        )
+
+
+def validate_schema_contracts() -> None:
+    for schema_name, instance_name in SCHEMA_CONTRACTS:
+        _validate_schema_value(
+            _load_json(schema_name),
+            _load_json(instance_name),
+            schema_name=schema_name,
+            instance_name=instance_name,
+        )
 
 
 def validate_repository() -> str:
@@ -49,16 +110,7 @@ def validate_repository() -> str:
     ):
         raise ReleaseCheckError("repository marketplace does not expose codex-chromapaw")
 
-    for relative in (
-        "schemas/pet.schema.json",
-        "schemas/skin.schema.json",
-        "schemas/theme-profile.schema.json",
-        "schemas/windows-runtime-adapters.schema.json",
-        "schemas/macos-runtime-adapters.schema.json",
-        "runtime/windows-adapters.json",
-        "runtime/macos-adapters.json",
-    ):
-        _load_json(relative)
+    validate_schema_contracts()
 
     for skill in SKILLS:
         path = ROOT / "skills" / skill / "SKILL.md"
@@ -67,6 +119,39 @@ def validate_repository() -> str:
             raise ReleaseCheckError(f"{path.relative_to(ROOT)} has invalid frontmatter")
         if "\ndescription:" not in text:
             raise ReleaseCheckError(f"{path.relative_to(ROOT)} has no description")
+        closing = text.find("\n---", 4)
+        if closing < 0:
+            raise ReleaseCheckError(f"{path.relative_to(ROOT)} has unclosed frontmatter")
+        try:
+            frontmatter = yaml.safe_load(text[4:closing])
+        except yaml.YAMLError as exc:
+            raise ReleaseCheckError(
+                f"{path.relative_to(ROOT)} has invalid YAML frontmatter: {exc}"
+            ) from exc
+        if not isinstance(frontmatter, dict) or set(frontmatter) - {
+            "name",
+            "description",
+            "license",
+            "allowed-tools",
+            "metadata",
+        }:
+            raise ReleaseCheckError(
+                f"{path.relative_to(ROOT)} has unsupported frontmatter fields"
+            )
+        agent = ROOT / "skills" / skill / "agents" / "openai.yaml"
+        if agent.is_file():
+            try:
+                agent_value = yaml.safe_load(agent.read_text(encoding="utf-8"))
+            except yaml.YAMLError as exc:
+                raise ReleaseCheckError(
+                    f"{agent.relative_to(ROOT)} is invalid YAML: {exc}"
+                ) from exc
+            if not isinstance(agent_value, dict) or not isinstance(
+                agent_value.get("interface"), dict
+            ):
+                raise ReleaseCheckError(
+                    f"{agent.relative_to(ROOT)} must contain interface metadata"
+                )
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     release_version = version.split("+", 1)[0]
@@ -82,6 +167,7 @@ def validate_repository() -> str:
         "scripts/macos_visual_smoke.mjs",
         "tests/fixtures/macos-harness/index.html",
         "tests/fixtures/macos-harness/pet-overlay.html",
+        "requirements-dev.txt",
     ):
         if not (ROOT / relative).is_file():
             raise ReleaseCheckError(f"{relative} is missing")

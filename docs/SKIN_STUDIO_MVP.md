@@ -59,7 +59,7 @@ Theme-profile preparation, request preparation, compatibility probes, and valida
 
 Skin Studio v2 packages are ready for preview, review, storage, and a separately supported runtime. Package validity does not imply runtime compatibility or activation consent.
 
-After generation, ChromaPaw emits a non-mutating handoff. A skin is reported as `generated-not-active`; a pet is `generated-not-installed`. On Windows, `应用这个皮肤` starts read-only runtime preflight and does not itself activate anything. Activation still requires the later experimental-runtime confirmation. Pet installation likewise waits for `安装这个宠物`, or an id-specific replacement confirmation when a destination already exists.
+After generation, ChromaPaw emits a non-mutating handoff. A skin is reported as `generated-not-active`; a pet is `generated-not-installed`. On Windows, `应用这个皮肤` is offered only when discovery finds an enabled exact-version adapter; it starts read-only runtime preflight and does not itself activate anything. Activation still requires the later experimental-runtime confirmation. Pet installation and selection likewise wait for `安装这个宠物`, or an id-specific replacement confirmation when a destination already exists. An already-open Codex may need to be closed and reopened before the selected pet appears.
 
 - Windows activation is experimental and requires an exact enabled adapter after separate preflight and acknowledgment.
 - macOS has a read-only compatibility probe but no activation implementation.

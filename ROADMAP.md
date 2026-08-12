@@ -47,14 +47,24 @@
 - Report generation, pet-dependency, and activation readiness separately.
 - Discover macOS app bundles and collect read-only preflight evidence without implementing activation.
 
-## 0.4.5 — Release-candidate hardening
+## 0.4.5 — Release-candidate hardening ✅
 
 - Persist the last validated Windows skin through separate Desktop and Start Menu launchers.
+- Host and verify the shortcut runtime outside the replaceable plugin cache.
 - Keep the application-managed shortcut untouched and verify semantic ownership before removal.
 - Add cross-platform CI and one-command release checks.
 - Detect legacy and invalid installed pets without silently deleting or replacing them.
+- Install and safely select pets with TOML validation, backups, and concurrency-safe rollback.
 - Maintain deterministic input-shape coverage plus a real-image release regression matrix.
 - Require a clean GitHub installation smoke test before the public tag is considered verified.
+
+## 0.4.6 — Generation and runtime safety hardening ✅
+
+- Make generation-to-install/application handoffs explicit and machine-readable.
+- Validate pet selection as TOML with backup, locking, and concurrency-aware rollback.
+- Bind Windows executables to verified PE identity and pin hosted shortcut runtime bundles.
+- Make Windows status and CSS updates continuity-aware and compensating on failure.
+- Validate schemas, external workflow contracts, and isolated installation in the release gate.
 
 ## 0.4.x — Runtime hardening
 

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 2,
+  "id": "schema-fixture-skin",
+  "displayName": "Schema Fixture Skin",
+  "description": "A minimal valid Skin Studio v2 manifest used by release checks.",
+  "mode": "adaptive",
+  "assets": {
+    "background": "assets/background.png",
+    "stylesheet": "assets/theme.css",
+    "preview": "assets/preview.png",
+    "stylesheets": {
+      "light": "assets/theme-light.css",
+      "dark": "assets/theme-dark.css",
+      "adaptive": "assets/theme.css"
+    },
+    "previews": {
+      "light-16x10": "assets/previews/preview-light-16x10.png",
+      "light-16x9": "assets/previews/preview-light-16x9.png",
+      "light-4x3": "assets/previews/preview-light-4x3.png",
+      "dark-16x10": "assets/previews/preview-dark-16x10.png",
+      "dark-16x9": "assets/previews/preview-dark-16x9.png",
+      "dark-4x3": "assets/previews/preview-dark-4x3.png"
+    }
+  },
+  "theme": {
+    "surface": "#EAF4F6",
+    "ink": "#102A33",
+    "accent": "#18A7B5",
+    "panelOpacity": 0.78,
+    "palettes": {
+      "light": {
+        "surface": "#EAF4F6",
+        "ink": "#102A33",
+        "accent": "#18A7B5",
+        "panelOpacity": 0.78
+      },
+      "dark": {
+        "surface": "#102A33",
+        "ink": "#EAF4F6",
+        "accent": "#45D7E4",
+        "panelOpacity": 0.82
+      }
+    }
+  },
+  "layout": {
+    "safeContentZone": {
+      "x": 0.2,
+      "y": 0.08,
+      "width": 0.7,
+      "height": 0.84
+    },
+    "depthLayers": [
+      "atmosphere",
+      "distant",
+      "midground",
+      "foreground"
+    ],
+    "visualTreatment": {
+      "sceneFidelity": "preserve",
+      "contentProtection": "local-surfaces",
+      "subjectPlacement": "edge-balanced",
+      "artworkRecomposed": false,
+      "globalWashOpacity": 0.08
+    }
+  },
+  "variants": [
+    {
+      "id": "light-16x10",
+      "mode": "light",
+      "aspectRatio": "16:10",
+      "preview": "assets/previews/preview-light-16x10.png",
+      "stylesheet": "assets/theme-light.css"
+    },
+    {
+      "id": "light-16x9",
+      "mode": "light",
+      "aspectRatio": "16:9",
+      "preview": "assets/previews/preview-light-16x9.png",
+      "stylesheet": "assets/theme-light.css"
+    },
+    {
+      "id": "light-4x3",
+      "mode": "light",
+      "aspectRatio": "4:3",
+      "preview": "assets/previews/preview-light-4x3.png",
+      "stylesheet": "assets/theme-light.css"
+    },
+    {
+      "id": "dark-16x10",
+      "mode": "dark",
+      "aspectRatio": "16:10",
+      "preview": "assets/previews/preview-dark-16x10.png",
+      "stylesheet": "assets/theme-dark.css"
+    },
+    {
+      "id": "dark-16x9",
+      "mode": "dark",
+      "aspectRatio": "16:9",
+      "preview": "assets/previews/preview-dark-16x9.png",
+      "stylesheet": "assets/theme-dark.css"
+    },
+    {
+      "id": "dark-4x3",
+      "mode": "dark",
+      "aspectRatio": "4:3",
+      "preview": "assets/previews/preview-dark-4x3.png",
+      "stylesheet": "assets/theme-dark.css"
+    }
+  ],
+  "source": {
+    "author": "ChromaPaw test suite",
+    "license": "Apache-2.0"
+  },
+  "qa": "qa/skin-studio-report.json"
+}

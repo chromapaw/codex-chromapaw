@@ -31,7 +31,10 @@ Activation starts a hidden local Python monitor that checks eligible targets onc
 - Unknown versions and disabled adapters fail closed.
 - Preflight records the absolute executable path and SHA-256 hash.
 - Active state records the adapter file path and SHA-256 hash.
-- Verification refuses a changed executable, changed adapter file, changed adapter id, wrong browser product, non-loopback websocket, or different process executable.
+- Verification refuses a changed executable, changed adapter file, changed adapter id, wrong browser product, non-loopback websocket, or different process identity.
+- New sessions bind each owned PID to its executable path, executable hash, and Windows process creation FILETIME so PID reuse at the same path cannot authorize termination. Older active sessions remain recoverable through the prior exact-path and hash checks.
+- Runtime mutations use an operating-system-owned advisory lock that is automatically released after an owner crash.
+- Hot CSS refresh snapshots the currently owned style and treats CSS, monitor replacement, active state, and saved preference as one compensating transaction.
 - Restore verifies process identity before terminating anything.
 
 The executable hash is a per-session continuity check, not a claim that every allowed binary has been cryptographically published by OpenAI.

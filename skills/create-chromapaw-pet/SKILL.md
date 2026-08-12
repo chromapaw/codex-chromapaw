@@ -21,8 +21,9 @@ Read [references/pet-mvp.md](references/pet-mvp.md) before preparing, validating
 8. Stage the approved `pet.json` and final extended spritesheet in a package directory outside the live Codex pets directory.
 9. Run `scripts/validate_pet_package.py` on the staged directory. This structural validator supplements, but never replaces, `$hatch-pet` deterministic and visual QA.
 10. Show the extended contact sheet, direction sheet, and motion previews before installation.
-11. Run `scripts/post_generation_guidance.py pet <package> --platform auto --json`. Present its exact `generated-not-installed` status, destination, replacement state, and confirmation phrase. Always say that generation did **not** install or select the pet.
-12. Stop and wait for the separate confirmation returned by the guidance script. For a new id, install only after the user replies `安装这个宠物`. For an existing id, show the destination and install only after the user replies `同意替换安装宠物 <id>`; the replace operation must create and report its backup. A request to create or generate a pet never counts as installation confirmation.
+11. Run `scripts/post_generation_guidance.py pet <package> --platform auto --json`. Present its exact `generated-not-installed` status, destination, replacement state, selection behavior, possible restart requirement, and confirmation phrase. Always say that generation did **not** install or select the pet.
+12. Stop and wait for the separate confirmation returned by the guidance script. For a new id, after the user replies `安装这个宠物`, run `scripts/install_pet.py <package> --select --json`. For an existing id, show the destination and install only after the user replies `同意替换安装宠物 <id>`, then run `scripts/install_pet.py <package> --replace --select --json`; the replace operation must create and report its pet backup, and selection must report any config backup. A request to create or generate a pet never counts as installation confirmation.
+13. Report the selected avatar id and whether a restart may be required. If the pet is not immediately visible while Codex is open, tell the user to close and reopen Codex; never claim live visibility without verifying the real app.
 
 ## Defaults
 
@@ -35,6 +36,7 @@ Read [references/pet-mvp.md](references/pet-mvp.md) before preparing, validating
 ## Safety
 
 - Do not overwrite an existing pet with the same id without confirmation.
+- Pet selection may edit only `[desktop].selected-avatar-id`; preserve all unrelated config, back up an existing config, and fail closed on duplicate or ambiguous keys.
 - Do not claim that changing a pet changes task execution behavior.
 - Do not package a partial or unvalidated atlas.
 - If `hatch-pet` is unavailable, preserve the dependency check JSON, stop, and report its remediation message instead of fabricating a pet format.

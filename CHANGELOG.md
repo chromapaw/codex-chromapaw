@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.4.6 — 2026-08-13
 
+- Recompute the hosted shortcut runtime's canonical bundle identity at every launch, reject coherent file-plus-manifest tampering, linked or unlisted files, and bind the result to both the current pointer and content-addressed generation name.
+- Replace crash-persistent runtime sentinel locks with OS-owned advisory locks, bind new process ownership to Windows creation time, deepen status continuity checks, and make active CSS refresh compensating across CSS, monitor, state, and saved preference writes.
+- Validate pet-selection edits as TOML before and after writing, and fail closed on dotted or quoted equivalent declarations instead of risking duplicate tables or keys.
+- Make failed pet selection rollback concurrency-safe by preserving an install that changed after placement instead of deleting another process's update.
+- Verify JSON Schema contracts in the release gate and report skin generation as not ready when Pillow is unavailable.
+- Make the hosted Windows shortcut bootstrap revalidate its generation manifest and every content hash at launch, and roll back shortcut and pointer writes when receipt persistence fails.
+- Bound the enhanced macOS renderer subprocess so a stalled browser fails with a clear timeout instead of hanging CI indefinitely.
+- Offer the Windows skin-application handoff only when discovery finds an enabled exact-version adapter; incompatible and undiscovered Windows builds now remain preview-only instead of receiving a misleading confirmation phrase.
+- Add an explicit install-and-select pet flow that backs up `config.toml`, preserves unrelated settings, rejects ambiguous desktop selection keys, rolls back a new package when selection fails, and reports whether reopening Codex may be required.
+- Split deterministic skin packaging from host image-generation availability in the machine-readable capability report and include safe-zone subject conflicts in the scene-generation requirement.
+- Replace the four-file `hatch-pet` shape check with a machine-readable compatibility contract covering skill metadata and all preparation, assembly, direction, visual, blind-review, continuity, preview, and validation scripts; empty or invalid Python helpers now fail closed.
+- Bind every Windows adapter to verified PE product metadata, Authenticode policy, and either an allowlisted executable hash or exact signed file version so a renamed executable in a version-shaped directory cannot pass preflight.
+- Host the Windows shortcut launcher, runtime module closure, and adapter registry in a content-addressed stable runtime directory so plugin cache upgrades or removal no longer leave Desktop and Start Menu entries pointing at vanished files.
+- Declare the repository-validator PyYAML dependency explicitly and validate skill/agent YAML in the release gate so malformed plugin metadata fails CI on a clean development environment.
 - Replace the 66% full-window scene wash with an 8% edge treatment, crisp scene saturation/contrast, and directional local reading protection so uploaded subjects stay vivid and dimensional.
 - Recompose complete-environment uploads when a face, character, logo, or hero object conflicts with Codex's reading/input safe zone; stage the subject left or right instead of blurring or fading it.
 - Record subject placement, recomposition state, local-surface protection, and the bounded global wash in generated package metadata and QA.

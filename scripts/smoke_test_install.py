@@ -14,6 +14,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+try:
+    from .check_dependencies import HATCH_PET_REQUIRED_PYTHON_SCRIPTS, HATCH_PET_SCRIPT_CONTRACTS
+except ImportError:
+    from check_dependencies import (  # type: ignore
+        HATCH_PET_REQUIRED_PYTHON_SCRIPTS,
+        HATCH_PET_SCRIPT_CONTRACTS,
+    )
+
 
 PLUGIN_NAME = "codex-chromapaw"
 MARKETPLACE_NAME = "chromapaw"
@@ -25,16 +33,22 @@ class SmokeTestError(RuntimeError):
 
 
 def run(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        command,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SmokeTestError(
+            f"command timed out after 120 seconds: {' '.join(command)}"
+        ) from exc
     if completed.returncode != 0:
         rendered = " ".join(command)
         raise SmokeTestError(
@@ -59,15 +73,28 @@ def find_installed_plugin(codex_home: Path) -> Path:
 
 def write_mock_hatch_pet(codex_home: Path) -> Path:
     root = codex_home / "skills" / "hatch-pet"
-    for relative in (
-        "SKILL.md",
-        "scripts/prepare_pet_run.py",
-        "scripts/assemble_extended_atlas.py",
-        "scripts/validate_atlas.py",
-    ):
+    skill = root / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(
+        "---\n"
+        "name: hatch-pet\n"
+        "description: Isolated compatible fixture for the ChromaPaw smoke test.\n"
+        "---\n\n"
+        "# Hatch Pet\n\n"
+        "Call load_workspace_dependencies before scripts. Build imagegen-jobs.json, "
+        "then package spriteVersionNumber: 2.\n",
+        encoding="utf-8",
+    )
+    for relative in HATCH_PET_REQUIRED_PYTHON_SCRIPTS:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# isolated smoke-test fixture\n", encoding="utf-8")
+        flags = HATCH_PET_SCRIPT_CONTRACTS[relative]["flags"]
+        path.write_text(
+            "def main():\n"
+            f"    flags = {flags!r}\n"
+            "    return len(flags)\n",
+            encoding="utf-8",
+        )
     return root
 
 
@@ -159,6 +186,7 @@ def smoke_test(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        timeout=30,
     )
     if missing.returncode != 1 or json.loads(missing.stdout).get("ok") is not False:
         raise SmokeTestError("dependency checker did not block a missing hatch-pet skill")

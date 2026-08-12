@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import struct
 import sys
 import tempfile
@@ -8,6 +10,7 @@ import unittest
 import zlib
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +19,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from install_pet import install_pet  # noqa: E402
 from pet_package import PetPackageError, validate_pet_package  # noqa: E402
+from pet_selection import inspect_selection, select_pet, selection_lock  # noqa: E402
 from prepare_pet_request import build_request  # noqa: E402
 from restore_pet import resolve_backup  # noqa: E402
 
@@ -236,6 +240,298 @@ class PetPackageTests(unittest.TestCase):
                 request["animationIntent"]["working"], "一边工作一边拍篮球"
             )
             self.assertEqual(request["animationIntent"]["ready"], "用篮球跳舞")
+
+    def test_install_and_select_preserves_config_and_backs_it_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            config = codex_home / "config.toml"
+            original = (
+                'model = "fixture"\n\n'
+                '[desktop]\n'
+                'selected-avatar-id = "custom:old-pet"\n\n'
+                '[features]\n'
+                'apps = true\n'
+            )
+            config.write_text(original, encoding="utf-8")
+
+            result = install_pet(package, codex_home, select=True)
+
+            selection = result["selection"]
+            self.assertEqual(selection["selectedAvatarId"], "custom:basket-buddy")
+            self.assertEqual(selection["previousSelectedAvatarId"], "custom:old-pet")
+            self.assertTrue(result["restartMayBeRequired"])
+            backup = Path(selection["backup"])
+            self.assertEqual(backup.read_text(encoding="utf-8"), original)
+            updated = config.read_text(encoding="utf-8")
+            self.assertIn('model = "fixture"', updated)
+            self.assertIn('[features]\napps = true', updated)
+            self.assertEqual(
+                inspect_selection(config)["selectedAvatarId"],
+                "custom:basket-buddy",
+            )
+
+    def test_standard_desktop_selection_is_safely_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            config.write_text(
+                'model = "fixture"\n\n'
+                '[desktop]\n'
+                'selected-avatar-id = "custom:old-pet" # keep this comment\n',
+                encoding="utf-8",
+            )
+
+            result = select_pet(codex_home, "basket-buddy")
+
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["selectedAvatarId"], "custom:basket-buddy")
+            self.assertEqual(
+                config.read_text(encoding="utf-8"),
+                'model = "fixture"\n\n'
+                '[desktop]\n'
+                'selected-avatar-id = "custom:basket-buddy" # keep this comment\n',
+            )
+
+    def test_dotted_desktop_selection_is_rejected_without_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            original = 'desktop.selected-avatar-id = "custom:old-pet"\n'
+            config.write_text(original, encoding="utf-8")
+
+            self.assertEqual(
+                inspect_selection(config)["selectedAvatarId"], "custom:old-pet"
+            )
+            with self.assertRaisesRegex(
+                PetPackageError, "equivalent desktop TOML declaration"
+            ):
+                select_pet(codex_home, "basket-buddy")
+
+            self.assertEqual(config.read_text(encoding="utf-8"), original)
+            self.assertFalse((codex_home / "pets").exists())
+
+    def test_quoted_desktop_table_is_rejected_without_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            original = '["desktop"]\nselected-avatar-id = "custom:old-pet"\n'
+            config.write_text(original, encoding="utf-8")
+
+            self.assertEqual(
+                inspect_selection(config)["selectedAvatarId"], "custom:old-pet"
+            )
+            with self.assertRaisesRegex(
+                PetPackageError, "equivalent desktop TOML declaration"
+            ):
+                select_pet(codex_home, "basket-buddy")
+
+            self.assertEqual(config.read_text(encoding="utf-8"), original)
+            self.assertFalse((codex_home / "pets").exists())
+
+    def test_quoted_selection_key_is_rejected_without_editing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            original = '[desktop]\n"selected-avatar-id" = "custom:old-pet"\n'
+            config.write_text(original, encoding="utf-8")
+
+            self.assertEqual(
+                inspect_selection(config)["selectedAvatarId"], "custom:old-pet"
+            )
+            with self.assertRaisesRegex(
+                PetPackageError, "equivalent selected-avatar-id TOML key"
+            ):
+                select_pet(codex_home, "basket-buddy")
+
+            self.assertEqual(config.read_text(encoding="utf-8"), original)
+            self.assertFalse((codex_home / "pets").exists())
+
+    def test_install_and_select_creates_desktop_table_when_config_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+
+            result = install_pet(package, codex_home, select=True)
+
+            self.assertEqual(
+                result["selection"]["selectedAvatarId"], "custom:basket-buddy"
+            )
+            self.assertIsNone(result["selection"]["backup"])
+            self.assertEqual(
+                (codex_home / "config.toml").read_text(encoding="utf-8"),
+                '[desktop]\nselected-avatar-id = "custom:basket-buddy"\n',
+            )
+
+    def test_ambiguous_config_rolls_back_new_pet_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            config = codex_home / "config.toml"
+            original = (
+                '[desktop]\nselected-avatar-id = "custom:first"\n'
+                'selected-avatar-id = "custom:second"\n'
+            )
+            config.write_text(original, encoding="utf-8")
+
+            with self.assertRaises(PetPackageError):
+                install_pet(package, codex_home, select=True)
+
+            self.assertFalse((codex_home / "pets" / "basket-buddy").exists())
+            self.assertEqual(config.read_text(encoding="utf-8"), original)
+
+    def test_selection_failure_preserves_concurrently_changed_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+            destination = codex_home / "pets" / "basket-buddy"
+
+            def mutate_installed_pet(*_args: object, **_kwargs: object) -> None:
+                manifest_path = destination / "pet.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["displayName"] = "Changed by another process"
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                raise PetPackageError("simulated selection failure")
+
+            with mock.patch("install_pet.select_pet", side_effect=mutate_installed_pet):
+                with self.assertRaisesRegex(
+                    PetPackageError,
+                    "changed concurrently; preserved the partial install",
+                ):
+                    install_pet(package, codex_home, select=True)
+
+            self.assertTrue(destination.is_dir())
+            self.assertEqual(
+                json.loads((destination / "pet.json").read_text(encoding="utf-8"))[
+                    "displayName"
+                ],
+                "Changed by another process",
+            )
+            self.assertEqual(
+                list((codex_home / "pets").glob(".chromapaw-rollback-*")), []
+            )
+
+    def test_selection_rejects_change_in_final_pre_replace_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            original = '[desktop]\nselected-avatar-id = "custom:old-pet"\n'
+            concurrent = original + '\n[user]\nnew-setting = true\n'
+            config.write_text(original, encoding="utf-8")
+            real_mkstemp = tempfile.mkstemp
+
+            def mutate_before_temporary(*args, **kwargs):
+                config.write_text(concurrent, encoding="utf-8")
+                return real_mkstemp(*args, **kwargs)
+
+            with mock.patch(
+                "pet_selection.tempfile.mkstemp", side_effect=mutate_before_temporary
+            ):
+                with self.assertRaisesRegex(
+                    PetPackageError,
+                    "changed immediately before pet selection",
+                ):
+                    select_pet(codex_home, "basket-buddy")
+
+            self.assertEqual(config.read_text(encoding="utf-8"), concurrent)
+            self.assertEqual(
+                list(codex_home.glob(".chromapaw-config-*")),
+                [],
+            )
+
+    def test_selection_lock_rejects_concurrent_chromapaw_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            config = codex_home / "config.toml"
+            original = '[desktop]\nselected-avatar-id = "custom:old-pet"\n'
+            config.write_text(original, encoding="utf-8")
+
+            with selection_lock(codex_home):
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import sys; from pathlib import Path; "
+                            f"sys.path.insert(0, {str(SCRIPTS)!r}); "
+                            "from pet_selection import select_pet; "
+                            f"select_pet(Path({str(codex_home)!r}), 'basket-buddy')"
+                        ),
+                    ],
+                    env=os.environ.copy(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("another ChromaPaw pet selection", completed.stderr)
+            self.assertEqual(config.read_text(encoding="utf-8"), original)
+
+    def test_selection_lock_reuses_stale_metadata_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codex_home = Path(temporary)
+            lock = codex_home / ".chromapaw-pet-selection.lock"
+            lock.write_text("pid=999999 stale=true\n", encoding="utf-8")
+            config = codex_home / "config.toml"
+            config.write_text(
+                '[desktop]\nselected-avatar-id = "custom:old-pet"\n',
+                encoding="utf-8",
+            )
+
+            result = select_pet(codex_home, "basket-buddy")
+
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["selectedAvatarId"], "custom:basket-buddy")
+            self.assertFalse(
+                result["coordination"]["externalUnlockedWriterAbsoluteCas"]
+            )
+
+    def test_selecting_already_selected_pet_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            config = codex_home / "config.toml"
+            config.write_text(
+                '[desktop]\nselected-avatar-id = "custom:basket-buddy"\n',
+                encoding="utf-8",
+            )
+
+            result = install_pet(package, codex_home, select=True)
+
+            self.assertFalse(result["selection"]["changed"])
+            self.assertFalse(result["restartMayBeRequired"])
+            self.assertIsNone(result["selection"]["backup"])
+
+    def test_linked_config_is_rejected_and_install_rolls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = make_package(root / "package")
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            target = root / "outside-config.toml"
+            target.write_text('[desktop]\n', encoding="utf-8")
+            config = codex_home / "config.toml"
+            try:
+                config.symlink_to(target)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation is unavailable")
+
+            with self.assertRaises(PetPackageError):
+                install_pet(package, codex_home, select=True)
+
+            self.assertFalse((codex_home / "pets" / "basket-buddy").exists())
+            self.assertEqual(target.read_text(encoding="utf-8"), '[desktop]\n')
 
 
 if __name__ == "__main__":

@@ -35,10 +35,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: requirements-skin.txt
+          cache-dependency-path: |
+            requirements-skin.txt
+            requirements-dev.txt
 
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-skin.txt
+        run: python -m pip install --disable-pip-version-check -r requirements-skin.txt -r requirements-dev.txt
 
       - name: Run release checks
         run: python scripts/release_check.py

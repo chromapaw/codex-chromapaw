@@ -46,6 +46,11 @@ def main() -> int:
         help="Back up and replace the currently installed pet",
     )
     parser.add_argument("--json", action="store_true", help="Write a JSON result")
+    parser.add_argument(
+        "--select",
+        action="store_true",
+        help="Select the restored pet in Codex config after restoration",
+    )
     args = parser.parse_args()
 
     try:
@@ -56,6 +61,7 @@ def main() -> int:
             codex_home,
             replace=args.replace,
             backup_label="before-restore",
+            select=args.select,
         )
         result["restoredFrom"] = str(backup)
     except (OSError, PetPackageError) as exc:

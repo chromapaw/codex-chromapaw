@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def report_capabilities(codex_home: Path) -> dict[str, Any]:
     dependencies = check_dependencies(codex_home)
     platform = sys.platform
-    skin_generation_ready = all(
+    skin_generation_implemented = all(
         path.is_file()
         for path in (
             ROOT / "scripts" / "prepare_theme_profile.py",
@@ -34,6 +34,7 @@ def report_capabilities(codex_home: Path) -> dict[str, Any]:
         )
     )
     pillow_available = importlib.util.find_spec("PIL") is not None
+    skin_generation_ready = skin_generation_implemented and pillow_available
     pet_generation_ready = bool(dependencies["dependencies"]["hatch-pet"]["available"])
     windows_candidates: list[dict[str, Any]] = []
     if platform == "win32":
@@ -51,25 +52,51 @@ def report_capabilities(codex_home: Path) -> dict[str, Any]:
     ]
     return {
         "ok": skin_generation_ready,
+        "reportGenerated": True,
+        "readinessSemantics": (
+            "ok means the deterministic skin-package workflow is locally ready; "
+            "inspect workflowReadiness for pet and combined readiness"
+        ),
+        "workflowReadiness": {
+            "skin": skin_generation_ready,
+            "pet": pet_generation_ready,
+            "allOneImageWorkflows": skin_generation_ready and pet_generation_ready,
+        },
         "platform": platform,
         "oneImageWorkflow": {
             "skinGeneration": {
-                "implemented": skin_generation_ready,
-                "ready": skin_generation_ready and pillow_available,
+                "implemented": skin_generation_implemented,
+                "ready": skin_generation_ready,
                 "pillowAvailable": pillow_available,
                 "semanticProfileRequired": True,
                 "contentRule": "motifs come from the uploaded image and user intent, never a fixed scene template",
-                "sceneExpansion": "requires Codex image generation only when the upload is not a full environment",
+                "deterministicPackagingReady": skin_generation_ready,
+                "sceneGeneration": {
+                    "requiredWhen": (
+                        "the upload is not a full environment or a salient subject "
+                        "overlaps the reading/input safe zone"
+                    ),
+                    "availability": "host-capability-not-programmatically-detectable",
+                },
+                "sceneExpansion": (
+                    "requires Codex image generation when the upload is not a full "
+                    "environment or a salient subject overlaps the reading/input safe zone"
+                ),
             },
             "petGeneration": {
                 "implemented": True,
                 "ready": pet_generation_ready,
                 "dependency": "hatch-pet",
                 "dependencyPath": dependencies["dependencies"]["hatch-pet"]["path"],
+                "dependencyValidation": dependencies["dependencies"]["hatch-pet"].get(
+                    "validation"
+                ),
             },
         },
         "petInstallation": {
             "implementation": "portable Python/CODEX_HOME workflow",
+            "selection": "implemented with config backup and conflict detection",
+            "visibilityVerification": "real Codex acceptance test still required",
             "windows": "implemented",
             "macos": "implementation present; real-device validation required",
         },

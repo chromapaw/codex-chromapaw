@@ -21,7 +21,7 @@ import time
 from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 try:
     from .cdp_client import CdpEndpoint, CdpError, inject_css, remove_css, verify_css
@@ -33,7 +33,7 @@ except ImportError:
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.6"
+RUNTIME_VERSION = "0.4.8"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ADAPTERS = ROOT / "runtime" / "windows-adapters.json"
 ACTIVE_FILE = "active.json"
@@ -43,7 +43,10 @@ STYLE_MARKER = 'data-avatar-overlay-content-frame="true"'
 BACKGROUND_URL = re.compile(r"url\(\s*(['\"]?)\./background\.png\1\s*\)")
 VOLATILE_CONFIG_KEYS = {"SKY_CUA_NATIVE_PIPE_DIRECTORY"}
 APP_VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){3}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SENSITIVE_RESULT_KEYS = {"sessionToken", "session"}
+
+ExecutableIdentityProbe = Callable[[Path], dict[str, Any]]
 
 
 class RuntimeFailure(RuntimeError):
@@ -74,6 +77,42 @@ def atomic_json(path: Path, value: object) -> None:
     os.replace(temporary, path)
 
 
+def _snapshot_optional_file(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeFailure(f"runtime transaction snapshot cannot be read: {path}: {exc}") from exc
+
+
+def _restore_optional_file(path: Path, content: bytes | None) -> None:
+    """Restore an exact pre-transaction file image without using atomic_json."""
+    if content is None:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".rollback.tmp")
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, path)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise RuntimeFailure(f"runtime transaction rollback cannot restore: {path}: {exc}") from exc
+
+
+def _restore_state_pair(
+    active_path: Path,
+    backup_active_path: Path,
+    state: dict[str, Any],
+) -> None:
+    content = (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _restore_optional_file(active_path, content)
+    _restore_optional_file(backup_active_path, content)
+
+
 def runtime_data_dir(override: Path | None = None) -> Path:
     if override is not None:
         return override.expanduser().resolve()
@@ -86,19 +125,56 @@ def runtime_data_dir(override: Path | None = None) -> Path:
 
 @contextlib.contextmanager
 def runtime_lock(data_dir: Path) -> Iterator[None]:
+    """Serialize runtime mutations with an OS-owned advisory lock.
+
+    The previous O_EXCL sentinel could survive a process crash and permanently
+    block recovery.  Advisory byte locks are released by the operating system
+    when the owning process exits, so a leftover metadata file is harmless.
+    """
     data_dir.mkdir(parents=True, exist_ok=True)
     lock = data_dir / LOCK_FILE
     try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise RuntimeFailure(f"another ChromaPaw runtime operation is active: {lock}") from exc
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR)
+    except OSError as exc:
+        raise RuntimeFailure(f"runtime operation lock cannot be opened: {lock}: {exc}") from exc
+    locked = False
     try:
-        os.write(descriptor, f"pid={os.getpid()} time={utc_now()}\n".encode("utf-8"))
-        os.close(descriptor)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if os.fstat(descriptor).st_size < 1:
+                    os.write(descriptor, b"\0")
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except (OSError, BlockingIOError) as exc:
+            raise RuntimeFailure(
+                f"another ChromaPaw runtime operation is active: {lock}"
+            ) from exc
+        metadata = f"pid={os.getpid()} time={utc_now()}\n".encode("utf-8")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        os.ftruncate(descriptor, 0)
+        os.write(descriptor, metadata)
+        os.fsync(descriptor)
         yield
     finally:
-        with contextlib.suppress(OSError):
-            lock.unlink()
+        if locked:
+            with contextlib.suppress(OSError):
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def load_adapters(path: Path) -> dict[str, Any]:
@@ -106,8 +182,8 @@ def load_adapters(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeFailure(f"runtime adapter file cannot be read: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schemaVersion") != 1:
-        raise RuntimeFailure("runtime adapter file must be a schemaVersion 1 object")
+    if not isinstance(data, dict) or data.get("schemaVersion") != 2:
+        raise RuntimeFailure("runtime adapter file must be a schemaVersion 2 object")
     adapters = data.get("adapters")
     if not isinstance(adapters, list) or not adapters:
         raise RuntimeFailure("runtime adapter file must contain adapters")
@@ -161,9 +237,225 @@ def load_adapters(path: Path) -> dict[str, Any]:
             raise RuntimeFailure(f"adapter {adapter_id} has invalid browser product prefixes")
         if not isinstance(adapter.get("testedTarget"), str) or not adapter["testedTarget"]:
             raise RuntimeFailure(f"adapter {adapter_id} must describe its tested target")
+        identity = adapter.get("executableIdentity")
+        if not isinstance(identity, dict):
+            raise RuntimeFailure(f"adapter {adapter_id} must declare executableIdentity")
+        for field in (
+            "productName",
+            "companyName",
+            "fileDescription",
+            "originalFilename",
+            "internalName",
+        ):
+            if not isinstance(identity.get(field), str) or not identity[field].strip():
+                raise RuntimeFailure(
+                    f"adapter {adapter_id} executableIdentity must declare {field}"
+                )
+        file_version = identity.get("fileVersion")
+        if file_version is not None and (
+            not isinstance(file_version, str) or not file_version.strip()
+        ):
+            raise RuntimeFailure(
+                f"adapter {adapter_id} executableIdentity has an invalid fileVersion"
+            )
+        allowed_hashes = identity.get("allowedSha256", [])
+        if (
+            not isinstance(allowed_hashes, list)
+            or ("allowedSha256" in identity and not allowed_hashes)
+            or not all(
+                isinstance(value, str) and SHA256_PATTERN.fullmatch(value.lower())
+                for value in allowed_hashes
+            )
+        ):
+            raise RuntimeFailure(
+                f"adapter {adapter_id} executableIdentity has invalid allowedSha256 values"
+            )
+        signature = identity.get("signature")
+        if not isinstance(signature, dict):
+            raise RuntimeFailure(
+                f"adapter {adapter_id} executableIdentity must declare a signature policy"
+            )
+        statuses = signature.get("allowedStatuses")
+        if not isinstance(statuses, list) or not statuses or not all(
+            isinstance(value, str) and value.strip() for value in statuses
+        ):
+            raise RuntimeFailure(
+                f"adapter {adapter_id} executableIdentity has invalid signature statuses"
+            )
+        signer_subject = signature.get("signerSubjectContains")
+        if signer_subject is not None and (
+            not isinstance(signer_subject, str) or not signer_subject.strip()
+        ):
+            raise RuntimeFailure(
+                f"adapter {adapter_id} executableIdentity has an invalid signer subject"
+            )
+        if adapter.get("activationEnabled") is True:
+            has_hash_pin = bool(allowed_hashes)
+            has_signed_version_gate = (
+                isinstance(file_version, str)
+                and any(value.casefold() == "valid" for value in statuses)
+                and isinstance(signer_subject, str)
+                and bool(signer_subject.strip())
+            )
+            if not has_hash_pin and not has_signed_version_gate:
+                raise RuntimeFailure(
+                    f"enabled adapter {adapter_id} must pin an executable hash or require "
+                    "a valid signer plus an exact PE fileVersion"
+                )
         seen_ids.add(adapter_id)
         seen_targets.add(target)
     return data
+
+
+def probe_executable_identity(executable: Path) -> dict[str, Any]:
+    """Read PE version metadata and Authenticode identity from Windows.
+
+    Runtime callers always use this operating-system probe. Unit tests on other
+    platforms can inject an explicit probe into :func:`select_adapter`; there
+    is deliberately no CLI switch or environment override for identity data.
+    """
+
+    executable = executable.expanduser().resolve()
+    if not executable.is_file():
+        raise RuntimeFailure(f"Codex executable does not exist: {executable}")
+    if os.name != "nt":
+        raise RuntimeFailure(
+            "Windows PE executable identity cannot be verified on this operating system"
+        )
+
+    script = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$path = $env:CHROMAPAW_IDENTITY_PATH
+$item = Get-Item -LiteralPath $path
+$info = $item.VersionInfo
+$signature = Get-AuthenticodeSignature -LiteralPath $path
+[ordered]@{
+  fileVersion = $info.FileVersion
+  productVersion = $info.ProductVersion
+  productName = $info.ProductName
+  companyName = $info.CompanyName
+  fileDescription = $info.FileDescription
+  originalFilename = $info.OriginalFilename
+  internalName = $info.InternalName
+  signatureStatus = [string]$signature.Status
+  signerSubject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null }
+  signerThumbprint = if ($signature.SignerCertificate) { $signature.SignerCertificate.Thumbprint } else { $null }
+} | ConvertTo-Json -Compress
+"""
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    environment = os.environ.copy()
+    environment["CHROMAPAW_IDENTITY_PATH"] = str(executable)
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                encoded,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+            creationflags=creation_flags,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeFailure(f"Windows PE executable identity probe failed: {exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "PowerShell returned no diagnostic"
+        raise RuntimeFailure(f"Windows PE executable identity probe failed: {detail}")
+    try:
+        identity = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeFailure("Windows PE executable identity probe returned invalid JSON") from exc
+    if not isinstance(identity, dict):
+        raise RuntimeFailure("Windows PE executable identity probe returned an invalid object")
+    identity["sha256"] = sha256_file(executable)
+    return identity
+
+
+def _verify_executable_identity(
+    executable: Path,
+    adapter: dict[str, Any],
+    probe: ExecutableIdentityProbe,
+) -> dict[str, Any]:
+    adapter_id = str(adapter.get("id"))
+    expected = adapter.get("executableIdentity")
+    if not isinstance(expected, dict):
+        raise RuntimeFailure(f"adapter {adapter_id} is missing executable identity policy")
+    try:
+        actual = probe(executable)
+    except RuntimeFailure:
+        raise
+    except Exception as exc:
+        raise RuntimeFailure(f"Windows PE executable identity probe failed: {exc}") from exc
+    if not isinstance(actual, dict):
+        raise RuntimeFailure("Windows PE executable identity probe returned an invalid object")
+
+    mismatches: list[str] = []
+    for field in (
+        "productName",
+        "companyName",
+        "fileDescription",
+        "originalFilename",
+        "internalName",
+    ):
+        expected_value = str(expected[field]).strip()
+        actual_value = actual.get(field)
+        if not isinstance(actual_value, str) or actual_value.strip().casefold() != expected_value.casefold():
+            mismatches.append(field)
+    expected_file_version = expected.get("fileVersion")
+    if isinstance(expected_file_version, str):
+        actual_file_version = actual.get("fileVersion")
+        if (
+            not isinstance(actual_file_version, str)
+            or actual_file_version.strip().casefold()
+            != expected_file_version.strip().casefold()
+        ):
+            mismatches.append("fileVersion")
+
+    allowed_hashes = {
+        value.lower() for value in expected.get("allowedSha256", []) if isinstance(value, str)
+    }
+    actual_hash = actual.get("sha256")
+    if allowed_hashes and (
+        not isinstance(actual_hash, str) or actual_hash.lower() not in allowed_hashes
+    ):
+        mismatches.append("sha256")
+
+    signature = expected.get("signature", {})
+    allowed_statuses = {
+        value.casefold()
+        for value in signature.get("allowedStatuses", [])
+        if isinstance(value, str)
+    }
+    actual_status = actual.get("signatureStatus")
+    if not isinstance(actual_status, str) or actual_status.casefold() not in allowed_statuses:
+        mismatches.append("signatureStatus")
+    signer_contains = signature.get("signerSubjectContains")
+    if isinstance(signer_contains, str):
+        actual_subject = actual.get("signerSubject")
+        if (
+            not isinstance(actual_subject, str)
+            or signer_contains.casefold() not in actual_subject.casefold()
+        ):
+            mismatches.append("signerSubject")
+
+    if mismatches:
+        raise RuntimeFailure(
+            f"adapter {adapter_id} rejected the executable identity: "
+            + ", ".join(sorted(set(mismatches)))
+        )
+    return actual
 
 
 def detect_app_version(executable: Path) -> str | None:
@@ -180,7 +472,11 @@ def detect_app_version(executable: Path) -> str | None:
 
 
 def select_adapter(
-    executable: Path, adapter_path: Path = DEFAULT_ADAPTERS, *, require_enabled: bool = True
+    executable: Path,
+    adapter_path: Path = DEFAULT_ADAPTERS,
+    *,
+    require_enabled: bool = True,
+    _identity_probe: ExecutableIdentityProbe | None = None,
 ) -> dict[str, Any]:
     executable = executable.expanduser().resolve()
     if not executable.is_file():
@@ -206,7 +502,12 @@ def select_adapter(
             isinstance(value, str) and value for value in schemes
         ):
             raise RuntimeFailure(f"adapter {adapter.get('id')} has invalid target schemes")
-        return adapter
+        identity = _verify_executable_identity(
+            executable, adapter, _identity_probe or probe_executable_identity
+        )
+        selected = dict(adapter)
+        selected["verifiedExecutableIdentity"] = identity
+        return selected
     raise RuntimeFailure(
         f"Codex {version} is not supported by the exact-version Windows adapter list"
     )
@@ -272,14 +573,17 @@ def discover_executables(adapter_path: Path = DEFAULT_ADAPTERS) -> list[dict[str
             adapter = select_adapter(resolved, adapter_path, require_enabled=False)
             adapter_id = adapter.get("id")
             activation_enabled = adapter.get("activationEnabled") is True
+            identity = adapter.get("verifiedExecutableIdentity")
         except RuntimeFailure as exc:
             reason = str(exc)
+            identity = None
         results.append(
             {
                 "executable": str(resolved),
                 "appVersion": version,
                 "adapterId": adapter_id,
                 "activationEnabled": activation_enabled,
+                "executableIdentity": identity,
                 "reason": reason,
             }
         )
@@ -313,6 +617,107 @@ def _windows_process_paths() -> dict[int, Path]:
         finally:
             kernel32.CloseHandle(handle)
     return results
+
+
+def _windows_process_creation_times() -> dict[int, int]:
+    """Return Windows process creation FILETIMEs keyed by PID.
+
+    A PID and executable path are not a sufficient ownership proof because
+    Windows can reuse a PID for a later process launched from the same path.
+    FILETIME is stable for the lifetime of the process and changes on reuse.
+    """
+    if os.name != "nt":
+        return {}
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    process_ids = (wintypes.DWORD * 8192)()
+    bytes_returned = wintypes.DWORD()
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    if not psapi.EnumProcesses(
+        ctypes.byref(process_ids), ctypes.sizeof(process_ids), ctypes.byref(bytes_returned)
+    ):
+        return {}
+    results: dict[int, int] = {}
+    count = bytes_returned.value // ctypes.sizeof(wintypes.DWORD)
+    for pid in process_ids[:count]:
+        if not pid:
+            continue
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            continue
+        try:
+            creation = wintypes.FILETIME()
+            exit_time = wintypes.FILETIME()
+            kernel_time = wintypes.FILETIME()
+            user_time = wintypes.FILETIME()
+            if kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel_time),
+                ctypes.byref(user_time),
+            ):
+                results[int(pid)] = (int(creation.dwHighDateTime) << 32) | int(
+                    creation.dwLowDateTime
+                )
+        finally:
+            kernel32.CloseHandle(handle)
+    return results
+
+
+def _record_process_creation_time(pid: int, *, label: str) -> int:
+    created = _windows_process_creation_times().get(pid)
+    if created is None:
+        raise RuntimeFailure(f"runtime could not record the {label} process creation identity")
+    return created
+
+
+def _process_identity_status(
+    pid: object,
+    executable: object,
+    creation_time: object = None,
+    executable_hash: object = None,
+) -> dict[str, Any]:
+    """Inspect process ownership without mutating it.
+
+    Creation time is required for newly-created 0.4.8 sessions.  It remains
+    optional while reading older active.json files so they can still be safely
+    restored using the previous exact-path gate.
+    """
+    if not isinstance(pid, int) or not isinstance(executable, str):
+        return {
+            "running": False,
+            "pathMatches": False,
+            "creationTimeMatches": False if creation_time is not None else None,
+            "executableHashMatches": False if executable_hash is not None else None,
+            "matches": False,
+            "recordedCreationTime": creation_time,
+            "actualCreationTime": None,
+        }
+    process_path = _windows_process_paths().get(pid)
+    expected = Path(executable).expanduser().resolve()
+    path_matches = process_path is not None and os.path.normcase(
+        str(process_path)
+    ) == os.path.normcase(str(expected))
+    actual_creation = _windows_process_creation_times().get(pid) if process_path else None
+    creation_matches = (
+        actual_creation == creation_time if isinstance(creation_time, int) else None
+    )
+    hash_matches: bool | None = None
+    if isinstance(executable_hash, str):
+        try:
+            hash_matches = sha256_file(expected) == executable_hash
+        except RuntimeFailure:
+            hash_matches = False
+    matches = path_matches and creation_matches is not False and hash_matches is not False
+    return {
+        "running": process_path is not None,
+        "pathMatches": path_matches,
+        "creationTimeMatches": creation_matches,
+        "executableHashMatches": hash_matches,
+        "matches": matches,
+        "recordedCreationTime": creation_time,
+        "actualCreationTime": actual_creation,
+    }
 
 
 def running_pids(executable: Path) -> list[int]:
@@ -467,6 +872,81 @@ def _results_pass(results: list[dict[str, Any]], key: str) -> bool:
     )
 
 
+def _style_target_ids(results: list[dict[str, Any]], key: str) -> set[str]:
+    return {
+        str(item.get("targetId"))
+        for item in results
+        if isinstance(item.get("result"), dict) and item["result"].get(key) is True
+    }
+
+
+def _snapshot_runtime_css(
+    endpoint: CdpEndpoint,
+    css_hash: str,
+    session_token: str,
+    schemes: set[str],
+) -> dict[str, Any]:
+    """Read and validate the currently-owned stylesheet before hot mutation."""
+    expression = """(() => {
+  const style = document.getElementById("chromapaw-runtime-style");
+  if (!style || !style.isConnected) return {owned: false, reason: "style-absent"};
+  if (style.dataset.chromapawHash !== %s || style.dataset.chromapawSession !== %s) {
+    return {owned: false, reason: "marker-identity-mismatch"};
+  }
+  return {owned: true, hash: style.dataset.chromapawHash, css: style.textContent || ""};
+})()""" % (json.dumps(css_hash), json.dumps(session_token))
+    snapshots: list[dict[str, Any]] = []
+    for target in endpoint.targets(schemes):
+        value = endpoint.evaluate(target, expression)
+        snapshots.append({"targetId": target.id, "result": value})
+    if not snapshots or any(
+        not isinstance(item.get("result"), dict)
+        or item["result"].get("owned") is not True
+        or not isinstance(item["result"].get("css"), str)
+        for item in snapshots
+    ):
+        raise RuntimeFailure(
+            f"current CSS ownership could not be snapshotted for rollback: {snapshots}"
+        )
+    css_values = {str(item["result"]["css"]) for item in snapshots}
+    if len(css_values) != 1:
+        raise RuntimeFailure("eligible targets do not share one rollback-safe CSS value")
+    css = next(iter(css_values))
+    if hashlib.sha256(css.encode("utf-8")).hexdigest() != css_hash:
+        raise RuntimeFailure("current CSS content does not match its recorded rollback hash")
+    return {"css": css, "cssHash": css_hash, "targets": snapshots}
+
+
+def _rollback_css_refresh(
+    endpoint: CdpEndpoint,
+    previous_snapshot: dict[str, Any],
+    new_css_hash: str,
+    session_token: str,
+    schemes: set[str],
+) -> list[dict[str, Any]]:
+    """Compensate a failed hot refresh before persistent state is committed."""
+    removed = remove_css(endpoint, new_css_hash, session_token, schemes)
+    failed_removals = [
+        item
+        for item in removed
+        if isinstance(item.get("result"), dict)
+        and item["result"].get("reason") not in {None, "already-absent"}
+        and item["result"].get("removed") is not True
+    ]
+    if failed_removals:
+        raise RuntimeFailure(f"updated CSS could not be removed during rollback: {failed_removals}")
+    restored = inject_css(
+        endpoint,
+        str(previous_snapshot["css"]),
+        str(previous_snapshot["cssHash"]),
+        session_token,
+        schemes,
+    )
+    if not _results_pass(restored, "applied"):
+        raise RuntimeFailure(f"previous CSS could not be restored during rollback: {restored}")
+    return restored
+
+
 def inject_until_ready(
     endpoint: CdpEndpoint,
     compiled: dict[str, Any],
@@ -616,60 +1096,65 @@ def refresh_preference_for_runtime_update(
         raise RuntimeFailure(
             "refreshing a saved skin for a runtime update requires explicit acknowledgment"
         )
-    status = runtime_status(data_dir)
-    if status.get("status") == "active":
-        raise RuntimeFailure(
-            "an active healthy runtime already owns the selected skin; restore it before refreshing"
+    with runtime_lock(data_dir):
+        if _read_active(data_dir) is not None:
+            raise RuntimeFailure(
+                "an active runtime session owns the selected skin; restore it before refreshing"
+            )
+        preference = _read_preference(data_dir)
+        if preference is None:
+            raise RuntimeFailure("no preferred skin exists to refresh")
+        preflight = build_preflight(
+            Path(preference["package"]),
+            Path(preference["executable"]),
+            adapters.expanduser().resolve(),
         )
-    preference = _read_preference(data_dir)
-    if preference is None:
-        raise RuntimeFailure("no preferred skin exists to refresh")
-    preflight = build_preflight(
-        Path(preference["package"]),
-        Path(preference["executable"]),
-        adapters.expanduser().resolve(),
-    )
-    immutable_fields = (
-        "packageId",
-        "manifestHash",
-        "executableHash",
-        "appVersion",
-        "adapterId",
-        "adapterFileHash",
-    )
-    changed = sorted(
-        field for field in immutable_fields if preflight.get(field) != preference.get(field)
-    )
-    if changed:
-        raise RuntimeFailure(
-            "saved skin identity changed; run a new reviewed activation instead: "
-            + ", ".join(changed)
+        immutable_fields = (
+            "packageId",
+            "manifestHash",
+            "executableHash",
+            "appVersion",
+            "adapterId",
+            "adapterFileHash",
         )
-    previous_css_hash = preference["cssHash"]
-    refreshed = remember_preference(data_dir, preflight)
-    result = {
-        "ok": True,
-        "status": "refreshed" if refreshed["cssHash"] != previous_css_hash else "unchanged",
-        "packageId": refreshed["packageId"],
-        "appVersion": refreshed["appVersion"],
-        "previousRuntimeVersion": preference.get("runtimeVersion"),
-        "runtimeVersion": refreshed["runtimeVersion"],
-        "previousCssHash": previous_css_hash,
-        "cssHash": refreshed["cssHash"],
-        "immutableContinuity": {field: True for field in immutable_fields},
-    }
-    _append_history(
-        data_dir,
-        {
-            "time": utc_now(),
-            "event": "preferred-skin-runtime-refreshed",
+        changed = sorted(
+            field
+            for field in immutable_fields
+            if preflight.get(field) != preference.get(field)
+        )
+        if changed:
+            raise RuntimeFailure(
+                "saved skin identity changed; run a new reviewed activation instead: "
+                + ", ".join(changed)
+            )
+        previous_css_hash = preference["cssHash"]
+        refreshed = remember_preference(data_dir, preflight)
+        result = {
+            "ok": True,
+            "status": (
+                "refreshed" if refreshed["cssHash"] != previous_css_hash else "unchanged"
+            ),
             "packageId": refreshed["packageId"],
+            "appVersion": refreshed["appVersion"],
             "previousRuntimeVersion": preference.get("runtimeVersion"),
             "runtimeVersion": refreshed["runtimeVersion"],
-            "cssHashChanged": refreshed["cssHash"] != previous_css_hash,
-        },
-    )
-    return result
+            "previousCssHash": previous_css_hash,
+            "cssHash": refreshed["cssHash"],
+            "immutableContinuity": {field: True for field in immutable_fields},
+        }
+        with contextlib.suppress(Exception):
+            _append_history(
+                data_dir,
+                {
+                    "time": utc_now(),
+                    "event": "preferred-skin-runtime-refreshed",
+                    "packageId": refreshed["packageId"],
+                    "previousRuntimeVersion": preference.get("runtimeVersion"),
+                    "runtimeVersion": refreshed["runtimeVersion"],
+                    "cssHashChanged": refreshed["cssHash"] != previous_css_hash,
+                },
+            )
+        return result
 
 
 def _append_history(data_dir: Path, event: dict[str, Any]) -> None:
@@ -705,6 +1190,7 @@ def build_preflight(
         "adapterFile": str(adapters),
         "adapterFileHash": sha256_file(adapters),
         "activationEnabled": adapter.get("activationEnabled") is True,
+        "executableIdentity": adapter["verifiedExecutableIdentity"],
         "allowedTargetSchemes": adapter["allowedTargetSchemes"],
         "runningPids": running_pids(executable),
         "package": str(compiled["packageDir"]),
@@ -788,15 +1274,29 @@ def _launch_monitor(data_dir: Path, session_id: str) -> subprocess.Popen[bytes]:
 
 
 def _terminate_process_tree(
-    pid: object, executable: object, *, label: str, timeout: float = 10.0
+    pid: object,
+    executable: object,
+    *,
+    label: str,
+    timeout: float = 10.0,
+    creation_time: object = None,
+    executable_hash: object = None,
 ) -> dict[str, Any]:
     if not isinstance(pid, int) or not isinstance(executable, str):
         raise RuntimeFailure(f"runtime state does not contain a valid {label} process")
-    process_path = _windows_process_paths().get(pid)
-    if process_path is None:
+    identity = _process_identity_status(pid, executable, creation_time, executable_hash)
+    if not identity["running"]:
         return {"terminated": True, "reason": "already-exited", "pid": pid, "label": label}
-    if os.path.normcase(str(process_path)) != os.path.normcase(str(Path(executable).resolve())):
-        raise RuntimeFailure(f"refusing to terminate a {label} PID whose executable identity changed")
+    if not identity["matches"]:
+        changed = [
+            key
+            for key in ("pathMatches", "creationTimeMatches", "executableHashMatches")
+            if identity.get(key) is False
+        ]
+        raise RuntimeFailure(
+            f"refusing to terminate a {label} PID whose process identity changed: "
+            + ", ".join(changed)
+        )
     completed = subprocess.run(
         ["taskkill", "/PID", str(pid), "/T", "/F"],
         stdin=subprocess.DEVNULL,
@@ -828,6 +1328,8 @@ def _terminate_runtime_process(state: dict[str, Any], timeout: float = 10.0) -> 
         state.get("executable"),
         label="Codex",
         timeout=timeout,
+        creation_time=state.get("processCreationTime"),
+        executable_hash=state.get("executableHash"),
     )
 
 
@@ -837,6 +1339,8 @@ def _terminate_monitor_process(state: dict[str, Any], timeout: float = 8.0) -> d
         state.get("monitorExecutable"),
         label="monitor",
         timeout=timeout,
+        creation_time=state.get("monitorCreationTime"),
+        executable_hash=state.get("monitorExecutableHash"),
     )
 
 
@@ -925,6 +1429,33 @@ def monitor_runtime(data_dir: Path, session_id: str, interval: float = 1.0) -> i
         return 1
 
 
+def _record_activation_failure(
+    data_dir: Path,
+    backup_dir: Path,
+    session_id: str,
+    error: Exception,
+    *,
+    process_launched: bool,
+    config_status: dict[str, Any],
+    rollback_errors: list[str],
+) -> None:
+    """Persist activation diagnostics without replacing the primary failure."""
+    failure = {
+        "schemaVersion": 1,
+        "sessionId": session_id,
+        "status": "activation-failed",
+        "failedAt": utc_now(),
+        "error": str(error),
+        "processLaunched": process_launched,
+        "config": config_status,
+        "rollbackErrors": rollback_errors,
+    }
+    with contextlib.suppress(Exception):
+        atomic_json(backup_dir / "failure.json", failure)
+    with contextlib.suppress(Exception):
+        _append_history(data_dir, failure)
+
+
 def activate_runtime(
     package: Path,
     executable: Path,
@@ -941,6 +1472,10 @@ def activate_runtime(
             "activation requires --acknowledge-experimental-runtime because Codex has no official skin API"
         )
     with runtime_lock(data_dir):
+        active_path = data_dir / ACTIVE_FILE
+        preference_path = data_dir / PREFERENCE_FILE
+        active_before = _snapshot_optional_file(active_path)
+        preference_before = _snapshot_optional_file(preference_path)
         if _read_active(data_dir) is not None:
             raise RuntimeFailure("an active ChromaPaw Windows runtime session already exists")
         preflight = build_preflight(package, executable, adapters)
@@ -954,10 +1489,18 @@ def activate_runtime(
         session_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4)
         session_token = secrets.token_urlsafe(24)
         backup = create_backup(data_dir, session_id, preflight)
+        backup_dir = Path(str(backup["backupDir"]))
+        backup_active_path = backup_dir / ACTIVE_FILE
+        backup_preference_path = backup_dir / PREFERENCE_FILE
+        backup_active_before = _snapshot_optional_file(backup_active_path)
+        backup_preference_before = _snapshot_optional_file(backup_preference_path)
         port = choose_ephemeral_port()
         endpoint = CdpEndpoint(port, timeout=5.0)
         schemes = set(adapter["allowedTargetSchemes"])
         process: subprocess.Popen[bytes] | None = None
+        monitor: subprocess.Popen[bytes] | None = None
+        state: dict[str, Any] | None = None
+        css_applied = False
         try:
             process = _launch_codex(executable.expanduser().resolve(), port, profile_dir)
             browser = wait_for_endpoint(endpoint, adapter, wait_seconds)
@@ -971,122 +1514,141 @@ def activate_runtime(
                 wait_seconds,
                 settle_seconds=min(10.0, max(2.0, wait_seconds / 3)),
             )
-        except Exception as exc:
-            with contextlib.suppress(Exception):
-                remove_css(endpoint, str(compiled["cssHash"]), session_token, schemes)
-            failed_state: dict[str, Any] = {
+            css_applied = True
+            if process is None:  # pragma: no cover - guarded by the launch call
+                raise RuntimeFailure("runtime launch returned no process")
+            process_creation_time = _record_process_creation_time(process.pid, label="Codex")
+            state = {
                 "schemaVersion": 1,
+                "runtimeVersion": RUNTIME_VERSION,
                 "sessionId": session_id,
-                "executable": str(executable.expanduser().resolve()),
+                "sessionToken": session_token,
+                "status": "active",
+                "startedAt": utc_now(),
+                "pid": process.pid,
+                "processCreationTime": process_creation_time,
+                "launchedByRuntime": True,
+                "executable": preflight["executable"],
+                "executableHash": preflight["executableHash"],
+                "appVersion": preflight["appVersion"],
+                "adapterId": preflight["adapterId"],
+                "adapterFile": preflight["adapterFile"],
+                "adapterFileHash": preflight["adapterFileHash"],
+                "port": port,
+                "allowedTargetSchemes": sorted(schemes),
+                "browser": browser,
+                "package": preflight["package"],
+                "packageId": preflight["packageId"],
+                "manifestHash": preflight["manifestHash"],
+                "cssHash": preflight["cssHash"],
+                "profileDir": str(profile_dir.resolve()) if profile_dir is not None else None,
                 "backupDir": backup["backupDir"],
+                "appliedTargets": applied,
+                "applicationFilesModified": False,
+                "codexConfigModified": False,
+                "transportDisclosure": (
+                    f"Unauthenticated Chrome DevTools Protocol bound to 127.0.0.1:{port}; "
+                    "the port closes when the runtime-launched Codex process stops."
+                ),
             }
-            if process is not None:
-                failed_state["pid"] = process.pid
-                with contextlib.suppress(Exception):
-                    _terminate_runtime_process(failed_state)
-            config_status = _config_backup_status(failed_state)
-            failure = {
-                "schemaVersion": 1,
-                "sessionId": session_id,
-                "status": "activation-failed",
-                "failedAt": utc_now(),
-                "error": str(exc),
-                "processLaunched": process is not None,
-                "config": config_status,
-            }
-            atomic_json(Path(backup["backupDir"]) / "failure.json", failure)
-            _append_history(data_dir, failure)
-            raise RuntimeFailure(f"activation failed and was rolled back: {exc}") from exc
-
-        if process is None:  # pragma: no cover - guarded by the try block
-            raise RuntimeFailure("runtime launch returned no process")
-
-        state = {
-            "schemaVersion": 1,
-            "runtimeVersion": RUNTIME_VERSION,
-            "sessionId": session_id,
-            "sessionToken": session_token,
-            "status": "active",
-            "startedAt": utc_now(),
-            "pid": process.pid,
-            "launchedByRuntime": True,
-            "executable": preflight["executable"],
-            "executableHash": preflight["executableHash"],
-            "appVersion": preflight["appVersion"],
-            "adapterId": preflight["adapterId"],
-            "adapterFile": preflight["adapterFile"],
-            "adapterFileHash": preflight["adapterFileHash"],
-            "port": port,
-            "allowedTargetSchemes": sorted(schemes),
-            "browser": browser,
-            "package": preflight["package"],
-            "packageId": preflight["packageId"],
-            "manifestHash": preflight["manifestHash"],
-            "cssHash": preflight["cssHash"],
-            "profileDir": str(profile_dir.resolve()) if profile_dir is not None else None,
-            "backupDir": backup["backupDir"],
-            "appliedTargets": applied,
-            "applicationFilesModified": False,
-            "codexConfigModified": False,
-            "transportDisclosure": (
-                f"Unauthenticated Chrome DevTools Protocol bound to 127.0.0.1:{port}; "
-                "the port closes when the runtime-launched Codex process stops."
-            ),
-        }
-        atomic_json(data_dir / ACTIVE_FILE, state)
-        atomic_json(Path(backup["backupDir"]) / "active.json", state)
-        monitor: subprocess.Popen[bytes] | None = None
-        try:
+            atomic_json(active_path, state)
+            atomic_json(backup_active_path, state)
             monitor = _launch_monitor(data_dir, session_id)
             state["monitorPid"] = monitor.pid
             state["monitorExecutable"] = str(Path(sys.executable).resolve())
             state["monitorExecutableHash"] = sha256_file(Path(sys.executable).resolve())
+            state["monitorCreationTime"] = _record_process_creation_time(
+                monitor.pid, label="monitor"
+            )
             state["monitorIntervalSeconds"] = 1.0
             state["backgroundMonitorDisclosure"] = (
                 "A hidden local Python monitor checks the active loopback CDP targets once per second "
                 "and injects CSS only when a new or unstyled Codex page appears."
             )
-            atomic_json(data_dir / ACTIVE_FILE, state)
-            atomic_json(Path(backup["backupDir"]) / "active.json", state)
+            atomic_json(active_path, state)
+            atomic_json(backup_active_path, state)
             time.sleep(0.25)
             if monitor.poll() is not None:
                 raise RuntimeFailure("background runtime monitor exited during startup")
             preference = remember_preference(data_dir, state)
-            atomic_json(Path(backup["backupDir"]) / PREFERENCE_FILE, preference)
+            atomic_json(backup_preference_path, preference)
         except Exception as exc:
-            if monitor is not None and monitor.poll() is None:
-                with contextlib.suppress(Exception):
-                    _terminate_monitor_process(state)
-            with contextlib.suppress(Exception):
-                remove_css(endpoint, str(compiled["cssHash"]), session_token, schemes)
-            with contextlib.suppress(Exception):
-                _terminate_runtime_process(state)
-            config_status = _config_backup_status(state)
-            failure = {
+            rollback_errors: list[str] = []
+            failed_state: dict[str, Any] = state or {
                 "schemaVersion": 1,
                 "sessionId": session_id,
-                "status": "activation-failed",
-                "failedAt": utc_now(),
-                "error": str(exc),
-                "processLaunched": True,
-                "config": config_status,
+                "executable": str(executable.expanduser().resolve()),
+                "executableHash": preflight["executableHash"],
+                "backupDir": backup["backupDir"],
             }
-            atomic_json(Path(backup["backupDir"]) / "failure.json", failure)
-            _append_history(data_dir, failure)
-            with contextlib.suppress(OSError):
-                (data_dir / ACTIVE_FILE).unlink()
-            raise RuntimeFailure(f"activation failed and was rolled back: {exc}") from exc
-        _append_history(
-            data_dir,
-            {
-                "time": utc_now(),
-                "event": "activated",
-                "sessionId": session_id,
-                "packageId": state["packageId"],
-                "appVersion": state["appVersion"],
-                "port": port,
-            },
-        )
+            if process is not None and "pid" not in failed_state:
+                failed_state["pid"] = process.pid
+                failed_state["processCreationTime"] = _windows_process_creation_times().get(
+                    process.pid
+                )
+            if monitor is not None and monitor.poll() is None:
+                try:
+                    _terminate_monitor_process(failed_state)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"monitor termination: {rollback_exc}")
+            if css_applied:
+                try:
+                    remove_css(endpoint, str(compiled["cssHash"]), session_token, schemes)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"CSS removal: {rollback_exc}")
+            if process is not None:
+                try:
+                    _terminate_runtime_process(failed_state)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"Codex termination: {rollback_exc}")
+            try:
+                config_status = _config_backup_status(failed_state)
+            except Exception as rollback_exc:
+                rollback_errors.append(f"config restore: {rollback_exc}")
+                config_status = {
+                    "unchanged": False,
+                    "restored": False,
+                    "reason": str(rollback_exc),
+                }
+            for path, content in (
+                (active_path, active_before),
+                (backup_active_path, backup_active_before),
+                (preference_path, preference_before),
+                (backup_preference_path, backup_preference_before),
+            ):
+                try:
+                    _restore_optional_file(path, content)
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"state restore {path}: {rollback_exc}")
+            _record_activation_failure(
+                data_dir,
+                backup_dir,
+                session_id,
+                exc,
+                process_launched=process is not None,
+                config_status=config_status,
+                rollback_errors=rollback_errors,
+            )
+            detail = (
+                " (rollback warnings: " + "; ".join(rollback_errors) + ")"
+                if rollback_errors
+                else ""
+            )
+            raise RuntimeFailure(
+                f"activation failed and was rolled back: {exc}{detail}"
+            ) from exc
+        with contextlib.suppress(Exception):
+            _append_history(
+                data_dir,
+                {
+                    "time": utc_now(),
+                    "event": "activated",
+                    "sessionId": session_id,
+                    "packageId": state["packageId"],
+                    "appVersion": state["appVersion"],
+                    "port": port,
+                },
+            )
         return state
 
 
@@ -1098,23 +1660,22 @@ def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
         executable = Path(str(state["executable"]))
         if sha256_file(executable) != state.get("executableHash"):
             raise RuntimeFailure("Codex executable hash changed after activation")
-        pid = state.get("pid")
-        process_path = _windows_process_paths().get(pid) if isinstance(pid, int) else None
-        if process_path is None or os.path.normcase(str(process_path)) != os.path.normcase(
-            str(executable.resolve())
-        ):
+        process_identity = _process_identity_status(
+            state.get("pid"),
+            state.get("executable"),
+            state.get("processCreationTime"),
+            state.get("executableHash"),
+        )
+        if not process_identity["matches"]:
             raise RuntimeFailure("runtime-launched Codex process is no longer running")
         monitor_pid = state.get("monitorPid")
-        monitor_path = (
-            _windows_process_paths().get(monitor_pid) if isinstance(monitor_pid, int) else None
+        monitor_identity = _process_identity_status(
+            monitor_pid,
+            state.get("monitorExecutable"),
+            state.get("monitorCreationTime"),
+            state.get("monitorExecutableHash"),
         )
-        monitor_expected = state.get("monitorExecutable")
-        monitor_matches = (
-            monitor_path is not None
-            and isinstance(monitor_expected, str)
-            and os.path.normcase(str(monitor_path))
-            == os.path.normcase(str(Path(monitor_expected).resolve()))
-        )
+        monitor_matches = monitor_identity["matches"]
         if not monitor_matches:
             raise RuntimeFailure("background runtime monitor is no longer running")
         endpoint = CdpEndpoint(int(state["port"]), timeout=5.0)
@@ -1148,6 +1709,8 @@ def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
             "pid": state["pid"],
             "monitorPid": monitor_pid,
             "monitorMatches": monitor_matches,
+            "processIdentity": process_identity,
+            "monitorIdentity": monitor_identity,
             "transport": {"host": "127.0.0.1", "port": state["port"]},
             "targets": checks,
             "repaired": repair,
@@ -1179,11 +1742,13 @@ def refresh_active_runtime_css(
         executable = Path(str(state["executable"])).expanduser().resolve()
         if sha256_file(executable) != state.get("executableHash"):
             raise RuntimeFailure("Codex executable hash changed after activation")
-        pid = state.get("pid")
-        process_path = _windows_process_paths().get(pid) if isinstance(pid, int) else None
-        if process_path is None or os.path.normcase(str(process_path)) != os.path.normcase(
-            str(executable)
-        ):
+        process_identity = _process_identity_status(
+            state.get("pid"),
+            state.get("executable"),
+            state.get("processCreationTime"),
+            state.get("executableHash"),
+        )
+        if not process_identity["matches"]:
             raise RuntimeFailure("runtime-launched Codex process is no longer running")
 
         package = Path(str(state["package"])).expanduser().resolve()
@@ -1213,60 +1778,118 @@ def refresh_active_runtime_css(
         schemes = set(state["allowedTargetSchemes"])
         compiled = compile_skin(package)
         previous_css_hash = str(state["cssHash"])
-
-        monitor_pid = state.get("monitorPid")
-        monitor_path = (
-            _windows_process_paths().get(monitor_pid) if isinstance(monitor_pid, int) else None
-        )
-        monitor_expected = state.get("monitorExecutable")
-        monitor_matches = (
-            monitor_path is not None
-            and isinstance(monitor_expected, str)
-            and os.path.normcase(str(monitor_path))
-            == os.path.normcase(str(Path(monitor_expected).resolve()))
-        )
-        if monitor_path is not None and not monitor_matches:
-            raise RuntimeFailure("refusing to stop a monitor whose executable identity changed")
-        if monitor_matches:
-            _terminate_monitor_process(state)
-
-        applied = inject_until_ready(
+        previous_snapshot = _snapshot_runtime_css(
             endpoint,
-            compiled,
+            previous_css_hash,
             str(state["sessionToken"]),
             schemes,
-            8.0,
-            settle_seconds=0.5,
         )
-        refreshed_at = utc_now()
-        state.update(
-            {
-                "runtimeVersion": RUNTIME_VERSION,
-                "cssHash": compiled["cssHash"],
-                "browser": browser,
-                "appliedTargets": applied,
-                "lastCssRefreshAt": refreshed_at,
-            }
-        )
-        atomic_json(data_dir / ACTIVE_FILE, state)
-        backup_dir = Path(str(state["backupDir"]))
-        atomic_json(backup_dir / "active.json", state)
 
-        monitor = _launch_monitor(data_dir, str(state["sessionId"]))
-        state["monitorPid"] = monitor.pid
-        state["monitorExecutable"] = str(Path(sys.executable).resolve())
-        state["monitorExecutableHash"] = sha256_file(Path(sys.executable).resolve())
-        state["monitorIntervalSeconds"] = 1.0
-        atomic_json(data_dir / ACTIVE_FILE, state)
-        atomic_json(backup_dir / "active.json", state)
-        time.sleep(0.25)
-        if monitor.poll() is not None:
-            raise RuntimeFailure(
-                "updated CSS is active, but the background runtime monitor exited during restart; retry refresh-active-css"
+        monitor_identity = _process_identity_status(
+            state.get("monitorPid"),
+            state.get("monitorExecutable"),
+            state.get("monitorCreationTime"),
+            state.get("monitorExecutableHash"),
+        )
+        old_monitor_was_running = monitor_identity["matches"]
+        if monitor_identity["running"] and not monitor_identity["matches"]:
+            raise RuntimeFailure("refusing to stop a monitor whose executable identity changed")
+        if old_monitor_was_running:
+            _terminate_monitor_process(state)
+
+        session_token = str(state["sessionToken"])
+        old_state = dict(state)
+        backup_dir = Path(str(old_state["backupDir"]))
+        active_path = data_dir / ACTIVE_FILE
+        backup_active_path = backup_dir / ACTIVE_FILE
+        preference_path = data_dir / PREFERENCE_FILE
+        backup_preference_path = backup_dir / PREFERENCE_FILE
+        preference_before = _snapshot_optional_file(preference_path)
+        backup_preference_before = _snapshot_optional_file(backup_preference_path)
+        monitor: subprocess.Popen[bytes] | None = None
+        try:
+            applied = inject_until_ready(
+                endpoint,
+                compiled,
+                session_token,
+                schemes,
+                8.0,
+                settle_seconds=0.5,
             )
+            monitor = _launch_monitor(data_dir, str(state["sessionId"]))
+            new_monitor = {
+                "monitorPid": monitor.pid,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": sha256_file(Path(sys.executable).resolve()),
+                "monitorCreationTime": _record_process_creation_time(
+                    monitor.pid, label="monitor"
+                ),
+                "monitorIntervalSeconds": 1.0,
+            }
+            time.sleep(0.25)
+            if monitor.poll() is not None:
+                raise RuntimeFailure("background runtime monitor exited during restart")
 
-        preference = remember_preference(data_dir, state)
-        atomic_json(backup_dir / PREFERENCE_FILE, preference)
+            refreshed_at = utc_now()
+            state.update(
+                {
+                    "runtimeVersion": RUNTIME_VERSION,
+                    "cssHash": compiled["cssHash"],
+                    "browser": browser,
+                    "appliedTargets": applied,
+                    "lastCssRefreshAt": refreshed_at,
+                    **new_monitor,
+                }
+            )
+            atomic_json(active_path, state)
+            atomic_json(backup_active_path, state)
+            preference = remember_preference(data_dir, state)
+            atomic_json(backup_preference_path, preference)
+        except Exception as exc:
+            if monitor is not None and monitor.poll() is None:
+                failed_monitor_state = {
+                    **old_state,
+                    "monitorPid": monitor.pid,
+                    "monitorExecutable": str(Path(sys.executable).resolve()),
+                    "monitorExecutableHash": sha256_file(Path(sys.executable).resolve()),
+                    "monitorCreationTime": _windows_process_creation_times().get(monitor.pid),
+                }
+                with contextlib.suppress(Exception):
+                    _terminate_monitor_process(failed_monitor_state)
+            rollback_error: Exception | None = None
+            try:
+                _rollback_css_refresh(
+                    endpoint,
+                    previous_snapshot,
+                    str(compiled["cssHash"]),
+                    session_token,
+                    schemes,
+                )
+            except Exception as rollback_exc:
+                rollback_error = rollback_exc
+            if old_monitor_was_running:
+                try:
+                    replacement = _launch_monitor(data_dir, str(old_state["sessionId"]))
+                    old_state.update(
+                        {
+                            "monitorPid": replacement.pid,
+                            "monitorExecutable": str(Path(sys.executable).resolve()),
+                            "monitorExecutableHash": sha256_file(Path(sys.executable).resolve()),
+                            "monitorCreationTime": _record_process_creation_time(
+                                replacement.pid, label="monitor"
+                            ),
+                        }
+                    )
+                except Exception as monitor_exc:
+                    rollback_error = rollback_error or monitor_exc
+            try:
+                _restore_state_pair(active_path, backup_active_path, old_state)
+                _restore_optional_file(preference_path, preference_before)
+                _restore_optional_file(backup_preference_path, backup_preference_before)
+            except Exception as state_exc:
+                rollback_error = rollback_error or state_exc
+            detail = f"; rollback incomplete: {rollback_error}" if rollback_error else ""
+            raise RuntimeFailure(f"active CSS refresh failed and was rolled back: {exc}{detail}") from exc
         changed_css = compiled["cssHash"] != previous_css_hash
         _append_history(
             data_dir,
@@ -1290,7 +1913,7 @@ def refresh_active_runtime_css(
             "previousCssHash": previous_css_hash,
             "cssHash": compiled["cssHash"],
             "runtimeVersion": RUNTIME_VERSION,
-            "monitorPid": monitor.pid,
+            "monitorPid": state["monitorPid"],
             "monitorRestarted": True,
             "targets": applied,
             "immutableContinuity": {field: True for field in immutable_fields},
@@ -1375,11 +1998,20 @@ def _config_backup_status(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def restore_runtime(data_dir: Path, *, operation: str = "restore") -> dict[str, Any]:
+def restore_runtime(
+    data_dir: Path,
+    *,
+    operation: str = "restore",
+    expected_session_id: str | None = None,
+) -> dict[str, Any]:
     with runtime_lock(data_dir):
         state = _read_active(data_dir)
         if state is None:
             raise RuntimeFailure("no active ChromaPaw Windows runtime session exists")
+        if expected_session_id is not None and state.get("sessionId") != expected_session_id:
+            raise RuntimeFailure(
+                "active runtime session changed before restore; refusing to restore a different session"
+            )
         monitor = _terminate_monitor_process(state)
         endpoint = CdpEndpoint(int(state["port"]), timeout=5.0)
         schemes = set(state["allowedTargetSchemes"])
@@ -1446,35 +2078,109 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
     if state is None:
         return {"ok": True, "status": "inactive", "dataDir": str(data_dir)}
     pid = state.get("pid")
-    process_path = _windows_process_paths().get(pid) if isinstance(pid, int) else None
-    process_matches = process_path is not None and os.path.normcase(str(process_path)) == os.path.normcase(
-        str(Path(str(state.get("executable"))).resolve())
+    process_identity = _process_identity_status(
+        pid,
+        state.get("executable"),
+        state.get("processCreationTime"),
+        state.get("executableHash"),
     )
     monitor_pid = state.get("monitorPid")
-    monitor_path = _windows_process_paths().get(monitor_pid) if isinstance(monitor_pid, int) else None
-    monitor_expected = state.get("monitorExecutable")
-    monitor_matches = (
-        monitor_path is not None
-        and isinstance(monitor_expected, str)
-        and os.path.normcase(str(monitor_path))
-        == os.path.normcase(str(Path(monitor_expected).resolve()))
+    monitor_identity = _process_identity_status(
+        monitor_pid,
+        state.get("monitorExecutable"),
+        state.get("monitorCreationTime"),
+        state.get("monitorExecutableHash"),
     )
+    legacy_session = not isinstance(state.get("processCreationTime"), int) or not isinstance(
+        state.get("monitorCreationTime"), int
+    )
+    continuity: dict[str, bool | None] = {
+        "adapterRegistryHashMatches": None,
+        "packageManifestHashMatches": None,
+        "compiledCssHashMatches": None,
+        "adapterIdentityMatches": None,
+        "browserIdentityMatches": None,
+        "styleOwnershipMatches": None,
+    }
+    errors: list[str] = []
+    adapter: dict[str, Any] | None = None
+    adapter_file_value = state.get("adapterFile")
+    if isinstance(adapter_file_value, str) and isinstance(state.get("adapterFileHash"), str):
+        try:
+            continuity["adapterRegistryHashMatches"] = (
+                sha256_file(Path(adapter_file_value).expanduser().resolve())
+                == state["adapterFileHash"]
+            )
+        except RuntimeFailure as exc:
+            continuity["adapterRegistryHashMatches"] = False
+            errors.append(str(exc))
+    package_value = state.get("package")
+    if isinstance(package_value, str):
+        package = Path(package_value).expanduser().resolve()
+        try:
+            manifest = package / "skin.json"
+            continuity["packageManifestHashMatches"] = (
+                isinstance(state.get("manifestHash"), str)
+                and sha256_file(manifest) == state["manifestHash"]
+            )
+            compiled = compile_skin(package)
+            continuity["compiledCssHashMatches"] = compiled["cssHash"] == state.get("cssHash")
+        except (OSError, RuntimeFailure, ValueError) as exc:
+            continuity["packageManifestHashMatches"] = False
+            continuity["compiledCssHashMatches"] = False
+            errors.append(str(exc))
     endpoint_reachable = False
-    with contextlib.suppress(CdpError, ValueError, TypeError):
-        CdpEndpoint(int(state["port"]), timeout=1.0).version()
+    style_checks: list[dict[str, Any]] = []
+    try:
+        endpoint = CdpEndpoint(int(state["port"]), timeout=1.0)
+        browser = endpoint.version()
         endpoint_reachable = True
+        if continuity["adapterRegistryHashMatches"] is True:
+            try:
+                adapter = _adapter_for_state(state)
+                continuity["adapterIdentityMatches"] = True
+                _validate_browser_identity(browser, adapter)
+                continuity["browserIdentityMatches"] = True
+            except (OSError, RuntimeFailure, ValueError) as exc:
+                continuity["adapterIdentityMatches"] = False
+                continuity["browserIdentityMatches"] = False
+                errors.append(str(exc))
+        if continuity["browserIdentityMatches"] is True:
+            style_checks = verify_css(
+                endpoint,
+                str(state["cssHash"]),
+                str(state["sessionToken"]),
+                set(state["allowedTargetSchemes"]),
+            )
+            continuity["styleOwnershipMatches"] = _results_pass(style_checks, "matches")
+    except (CdpError, OSError, RuntimeFailure, ValueError, TypeError) as exc:
+        errors.append(str(exc))
+
+    process_matches = process_identity["matches"]
+    monitor_matches = monitor_identity["matches"]
+    known_continuity = [value for value in continuity.values() if value is not None]
+    required_continuity = bool(known_continuity) and all(
+        value is True for value in known_continuity
+    )
+    ok = process_matches and endpoint_reachable and monitor_matches and required_continuity
     return {
-        "ok": process_matches and endpoint_reachable and monitor_matches,
-        "status": "active" if process_matches and endpoint_reachable and monitor_matches else "stale",
+        "ok": ok,
+        "status": "active" if ok else "stale",
         "dataDir": str(data_dir),
         "sessionId": state.get("sessionId"),
         "packageId": state.get("packageId"),
         "appVersion": state.get("appVersion"),
         "pid": pid,
         "processMatches": process_matches,
+        "processIdentity": process_identity,
         "monitorPid": monitor_pid,
         "monitorMatches": monitor_matches,
+        "monitorIdentity": monitor_identity,
+        "legacyProcessIdentity": legacy_session,
         "endpointReachable": endpoint_reachable,
+        "continuity": continuity,
+        "targets": style_checks,
+        "errors": errors,
         "transport": {"host": "127.0.0.1", "port": state.get("port")},
     }
 
@@ -1499,6 +2205,19 @@ def resume_runtime(
     status = runtime_status(data_dir)
     previous_status = str(status["status"])
     active = _read_active(data_dir)
+    active_session_id: str | None = None
+    if active is not None:
+        session_value = active.get("sessionId")
+        if not isinstance(session_value, str) or not session_value:
+            raise RuntimeFailure(
+                "active runtime state has no session identity; refusing an unguarded resume restore"
+            )
+        active_session_id = session_value
+        status_session_id = status.get("sessionId")
+        if not isinstance(status_session_id, str) or status_session_id != active_session_id:
+            raise RuntimeFailure(
+                "active runtime session changed during resume status inspection; retry resume"
+            )
     if status.get("ok") and active is not None:
         same_package = os.path.normcase(str(Path(str(active.get("package"))).resolve())) == os.path.normcase(
             str(Path(preference["package"]).resolve())
@@ -1519,7 +2238,11 @@ def resume_runtime(
 
     restored = None
     if active is not None:
-        restored = restore_runtime(data_dir, operation="restore")
+        restored = restore_runtime(
+            data_dir,
+            operation="restore",
+            expected_session_id=active_session_id,
+        )
 
     executable = Path(preference["executable"]).expanduser().resolve()
     package = Path(preference["package"]).expanduser().resolve()

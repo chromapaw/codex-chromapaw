@@ -1,0 +1,7 @@
+{
+  "id": "schema-fixture-pet",
+  "displayName": "Schema Fixture Pet",
+  "description": "A minimal valid v2 pet manifest used by release checks.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.png"
+}

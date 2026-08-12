@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "referenceSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "sourceKind": "full-environment",
+  "themeName": "Schema Fixture Scene",
+  "visualStyle": "layered illustrative environment",
+  "mood": "clear and calm",
+  "identityCues": [
+    "luminous horizon"
+  ],
+  "motifs": [
+    "soft geometric light"
+  ],
+  "avoidElements": [],
+  "depthPlan": {
+    "atmosphere": "A restrained ambient glow.",
+    "distant": "A low-detail horizon behind the interface.",
+    "midground": "Layered shapes frame the reading area.",
+    "foreground": "Subtle edge elements preserve the safe zone."
+  },
+  "safeZoneGuidance": "Keep the central reading and lower input regions low detail."
+}

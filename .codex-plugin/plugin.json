@@ -1,7 +1,7 @@
 {
   "name": "codex-chromapaw",
-  "version": "0.4.5+codex.20260812174654",
-  "description": "Turn one image into a custom Codex skin or animated pet.",
+  "version": "0.4.6+codex.20260813052000",
+  "description": "Build one-image Codex skin or pet packages with explicit dependency and activation gates.",
   "author": {
     "name": "ChromaPaw Community",
     "url": "https://github.com/chromapaw"
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "ChromaPaw for Codex",
-    "shortDescription": "Create Codex skins and animated pets from one image.",
-    "longDescription": "ChromaPaw turns one reference image into a validated animated Codex pet or image-specific Skin Studio v2 package with contrast-safe semantic IDE colors, reversible Windows Desktop and Start Menu launchers that remember the last skin, and a read-only macOS compatibility probe.",
+    "shortDescription": "Build reviewed Codex skin or pet packages from one image.",
+    "longDescription": "ChromaPaw builds an image-specific Skin Studio v2 package with contrast-safe IDE colors, or a validated animated pet when a compatible hatch-pet workflow is installed. Some skin inputs require the host's image-generation capability. Live skin activation is experimental and limited to enabled exact-version Windows adapters; macOS support is currently a read-only compatibility probe.",
     "developerName": "ChromaPaw Community",
     "category": "Creativity",
     "capabilities": [],

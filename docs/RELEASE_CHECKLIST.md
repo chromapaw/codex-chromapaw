@@ -5,6 +5,7 @@ Use this checklist for every public ChromaPaw release. Unit tests establish dete
 ## Automated gates
 
 - Run `python scripts/release_check.py` on Python 3.10 and 3.12.
+- Require the release check to validate repository registries and contract fixtures against their JSON Schemas.
 - Require GitHub Actions to pass on Windows, macOS, and Linux.
 - Require the enhanced Apple Silicon and Intel macOS harness to publish nonblank main-window and transparent-overlay screenshots plus a passing JSON report.
 - Validate the plugin with Codex's `plugin-creator` validator.
@@ -47,9 +48,10 @@ python scripts/smoke_test_install.py --source . --ref= --json
 3. Add the `chromapaw/codex-chromapaw` marketplace and install `codex-chromapaw@chromapaw`.
 4. Confirm `codex plugin list` reports the plugin as installed and enabled.
 5. Start a new Codex task and verify that natural-language pet and skin requests route to the expected skills.
-6. Generate and validate one pet and one skin from fresh references.
-7. On an enabled Windows adapter, activate the skin, close Codex, relaunch from both ChromaPaw shortcuts, and restore.
-8. Confirm the ordinary application shortcut still opens the default appearance.
+6. Install or explicitly point to a real compatible `hatch-pet` dependency before pet generation. The mock contract used by the repository smoke test proves dependency discovery only; it is not pet generation or visual-QA evidence.
+7. Generate and validate one pet and one skin from fresh references.
+8. On an enabled Windows adapter, activate the skin, close Codex, relaunch from both ChromaPaw shortcuts, and restore.
+9. Confirm the ordinary application shortcut still opens the default appearance.
 
 ## Platform claims
 

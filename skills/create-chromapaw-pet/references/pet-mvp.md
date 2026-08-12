@@ -12,7 +12,7 @@ Run the dependency preflight before request preparation:
 python scripts/check_dependencies.py --json
 ```
 
-Continue only when `dependencies.hatch-pet.available` is `true`. Use its returned `path` as the authoritative skill directory. If it is unavailable, report the checked paths and remediation message, then stop before image generation.
+Continue only when `dependencies.hatch-pet.available` is `true`. This means the skill metadata and complete preparation, atlas assembly, direction, visual-preview, blind-review, continuity, and structural-validation script contract passed. Use its returned `path` as the authoritative skill directory. If it is unavailable, report the checked paths, `validation.issues`, and remediation message, then stop before image generation.
 
 Keep three locations separate:
 
@@ -100,12 +100,12 @@ First generate the non-mutating user handoff:
 python scripts/post_generation_guidance.py pet <absolute-package-directory> --platform auto --json
 ```
 
-Report `generated-not-installed` and stop. Do not treat the original generation request as permission to install.
+Report `generated-not-installed`, the install-and-select behavior, and the possible restart requirement, then stop. Do not treat the original generation request as permission to install or select.
 
 For a new id:
 
 ```text
-python scripts/install_pet.py <absolute-package-directory> --json
+python scripts/install_pet.py <absolute-package-directory> --select --json
 ```
 
 Run that command only after the user replies `安装这个宠物`.
@@ -113,17 +113,17 @@ Run that command only after the user replies `安装这个宠物`.
 If the id already exists, stop and show the destination. Only after explicit approval:
 
 ```text
-python scripts/install_pet.py <absolute-package-directory> --replace --json
+python scripts/install_pet.py <absolute-package-directory> --replace --select --json
 ```
 
 The approval must name the id, for example `同意替换安装宠物 basket-buddy`.
 
-The replace path moves the previous directory into `pets/.chromapaw-backups/` before installing the staged package. Report both the destination and backup path.
+The replace path moves the previous directory into `pets/.chromapaw-backups/` before installing the staged package. Selection changes only `[desktop].selected-avatar-id`, preserves unrelated configuration, and backs up an existing config under `pets/.chromapaw-config-backups/`. Report the destination, pet backup when present, selected avatar id, config backup when present, and `restartMayBeRequired`. If Codex is already open and the pet is not visible, close and reopen Codex; do not claim visibility without a real-app check.
 
 Restore a named backup only after showing its manifest and current destination:
 
 ```text
-python scripts/restore_pet.py <backup-directory-name> --replace --json
+python scripts/restore_pet.py <backup-directory-name> --replace --select --json
 ```
 
 Do not modify `WindowsApps`, the signed Codex application bundle, or unrelated pet directories.

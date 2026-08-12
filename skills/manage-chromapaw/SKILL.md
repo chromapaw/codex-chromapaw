@@ -20,11 +20,11 @@ Read [references/safety-model.md](references/safety-model.md) completely before 
 - **Resume skin:** relaunch the last successfully activated Windows skin only after all saved package, executable, version, CSS, and adapter identities still match.
 - **Install persistent entries:** after separate consent, confirm the original Start Menu target and add distinctly named, semantic-ownership-hashed ChromaPaw Desktop and Start Menu launchers without modifying the original entry.
 - **Probe macOS:** use `scripts/macos_compat.py` only to collect read-only app metadata and package compatibility. There is no macOS activation command yet.
-- **Install or restore pet:** use `scripts/install_pet.py` or `scripts/restore_pet.py`; replacement must remain explicit and backup-backed.
+- **Install or restore pet:** use `scripts/install_pet.py` or `scripts/restore_pet.py` with `--select`; replacement must remain explicit and backup-backed. Report both pet and config backups, selected avatar id, and whether reopening Codex may be required.
 - **Stop or restore skin:** use the active runtime state. Never reconstruct session identifiers, ports, process ids, or backup paths from guesses.
 - **Remove:** delete only the selected ChromaPaw asset after confirming its resolved path remains inside the declared root.
 
-The standard post-generation phrase `应用这个皮肤` authorizes only read-only discovery and preflight. It is not the experimental runtime acknowledgment. Likewise, `安装这个宠物` authorizes a new pet install only; replacement requires the id-specific `同意替换安装宠物 <id>` phrase after the destination is shown.
+The standard post-generation phrase `应用这个皮肤` is offered only when discovery finds an enabled exact-version adapter, and authorizes only read-only discovery and preflight. It is not the experimental runtime acknowledgment. Likewise, after ChromaPaw explicitly explains selection and possible restart behavior, `安装这个宠物` authorizes a new pet install and selection only; replacement requires the id-specific `同意替换安装宠物 <id>` phrase after the destination is shown.
 
 ## Windows Runtime Beta workflow
 
@@ -88,6 +88,14 @@ python scripts/windows_runtime.py --json refresh-active-css --acknowledge-runtim
 
 Use this only when immutable package, executable, app-version, and adapter continuity must remain unchanged. If the command reports an identity change, stop and require a new reviewed activation. The command restarts only ChromaPaw's local CSS monitor.
 
+When no healthy runtime is active and a reviewed plugin update changes only the saved compiled CSS identity, require explicit acknowledgement and refresh the inactive preference before resume:
+
+```bash
+python scripts/windows_runtime.py --json refresh-preference --acknowledge-runtime-update
+```
+
+This path must refuse any package manifest, executable, app-version, adapter-id, or adapter-registry change. It is not a substitute for a new reviewed activation.
+
 A successful activation writes `preferred-skin.json` with restart-safe identities and hashes. It must not persist the session token, CDP port, target ids, titles, or conversation content.
 
 Never use `--allow-parallel-profile` for ordinary activation. It exists only for an isolated compatibility fixture with a separate `--profile-dir`.
@@ -144,4 +152,4 @@ After restore, the user may launch Codex normally without the debugging argument
 
 ## Current compatibility
 
-Version `0.4.5` enables Windows activation and resume only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json`. The locally discovered official AppX `26.803.5235.0` remains disabled because protected package execution rejected the required isolated runtime launch. The separate persistent shortcuts are Windows-only. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.
+The `0.4.x` runtime enables Windows activation and resume only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json` after PE metadata, signature policy, and pinned executable identity pass. The locally discovered official AppX build remains disabled because protected package execution rejected the required isolated runtime launch. The separate persistent shortcuts are Windows-only. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.
