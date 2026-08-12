@@ -114,6 +114,8 @@ const colorProbe = `() => {
   const mainSurface = style('main.main-surface');
   const sidebar = style('.app-shell-left-panel');
   const sidebarText = style('.nav-item.active');
+  const turnCarrier = getComputedStyle(document.querySelector('[data-turn-key]'), '::before');
+  const composerCarrier = style('[data-thread-scroll-footer] [data-pip-obstacle]');
   const before = getComputedStyle(document.body, '::before');
   const after = getComputedStyle(document.body, '::after');
   const root = style(':root');
@@ -128,6 +130,15 @@ const colorProbe = `() => {
       localProtection: mainSurface.backgroundImage,
       mainText: mainText.color,
       semanticContrast: ratio(mainText.color, semanticSurface),
+      turnCarrier: {
+        background: turnCarrier.backgroundColor,
+        border: turnCarrier.borderTopColor,
+        backdropFilter: turnCarrier.backdropFilter || turnCarrier.webkitBackdropFilter,
+      },
+      composerCarrier: {
+        background: composerCarrier.backgroundColor,
+        border: composerCarrier.borderTopColor,
+      },
     },
     sidebar: {
       background: sidebar.backgroundColor,
@@ -235,6 +246,9 @@ async function run() {
       requireGate(main.scene.wash === "rgba(0, 0, 0, 0)", `${mode}: a full-window scene wash is still active`);
       requireGate(!main.scene.sceneFilter.includes("blur"), `${mode}: scene fidelity filter blurs the artwork`);
       requireGate(main.scene.localProtection !== "none", `${mode}: local main-content protection is missing`);
+      requireGate(main.scene.turnCarrier.background !== "rgba(0, 0, 0, 0)", `${mode}: conversation turn carrier is transparent`);
+      requireGate(main.scene.turnCarrier.border !== "rgba(0, 0, 0, 0)", `${mode}: conversation turn carrier border is missing`);
+      requireGate(main.scene.composerCarrier.background !== "rgba(0, 0, 0, 0)", `${mode}: composer carrier is transparent`);
       requireGate(main.scene.semanticContrast >= 4.5, `${mode}: semantic main text contrast is below 4.5`);
       requireGate(main.sidebar.contrast >= 4.5, `${mode}: sidebar contrast is below 4.5`);
       requireGate(main.panelContrast >= 4.5, `${mode}: right panel contrast ${main.panelContrast.toFixed(2)} is below 4.5`);

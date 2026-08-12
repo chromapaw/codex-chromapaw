@@ -196,6 +196,15 @@ class SkinPackageValidationTests(unittest.TestCase):
                 css,
             )
             self.assertIn("--chromapaw-content-veil:", css)
+            self.assertIn(
+                "[data-thread-find-target] [data-turn-key]::before",
+                css,
+            )
+            self.assertIn("background: var(--chromapaw-reading-surface)", css)
+            self.assertIn(
+                "[data-thread-scroll-footer] [data-pip-obstacle]",
+                css,
+            )
             self.assertIn("saturate(var(--chromapaw-scene-saturation))", css)
             self.assertNotRegex(css, r"body::before\s*\{[^}]*blur\(")
             self.assertIn(
@@ -269,6 +278,12 @@ class SkinPackageValidationTests(unittest.TestCase):
             build_package(request_path, package)
             css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
             self.assertIn("linear-gradient(90deg", css)
+            self.assertIn("--chromapaw-reading-surface:", css)
+            self.assertIn("--chromapaw-reading-max-inline: 66%", css)
+            self.assertIn(
+                "max-inline-size: var(--chromapaw-reading-max-inline)",
+                css,
+            )
             manifest = json.loads((package / "skin.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 manifest["layout"]["visualTreatment"]["subjectPlacement"], "right"

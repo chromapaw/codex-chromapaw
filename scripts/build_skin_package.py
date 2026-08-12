@@ -29,7 +29,7 @@ except ImportError:
     from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
 
-GENERATOR_VERSION = "0.4.7"
+GENERATOR_VERSION = "0.4.8"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 GLOBAL_WASH_OPACITY = 0.08
@@ -205,24 +205,36 @@ def _variable_block(
     ui = semantic_ui_palette(palette, mode)
     opacity = palette["panelOpacity"]
     if subject_placement == "right":
+        reading_max_inline = "66%"
+        reading_margin_start = "0"
+        reading_margin_end = "auto"
         content_veil = (
             "linear-gradient(90deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
         )
     elif subject_placement == "left":
+        reading_max_inline = "66%"
+        reading_margin_start = "auto"
+        reading_margin_end = "0"
         content_veil = (
             "linear-gradient(270deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
         )
     elif subject_placement == "edge-balanced":
+        reading_max_inline = "100%"
+        reading_margin_start = "0"
+        reading_margin_end = "0"
         content_veil = (
             "radial-gradient(ellipse at center, "
             "rgb(var(--chromapaw-surface-rgb) / 0.34) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.18) 56%, transparent 92%)"
         )
     else:
+        reading_max_inline = "100%"
+        reading_margin_start = "0"
+        reading_margin_end = "0"
         content_veil = (
             "linear-gradient(90deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.24), "
@@ -262,6 +274,13 @@ def _variable_block(
   --chromapaw-scene-contrast: 1.06;
   --chromapaw-scene-position: center;
   --chromapaw-content-veil: {content_veil};
+  --chromapaw-reading-surface: rgb(var(--chromapaw-surface-rgb) / 0.78);
+  --chromapaw-reading-surface-strong: rgb(var(--chromapaw-surface-rgb) / 0.88);
+  --chromapaw-reading-border: rgb(var(--chromapaw-ink-rgb) / 0.14);
+  --chromapaw-reading-shadow: rgb(0 0 0 / 0.14);
+  --chromapaw-reading-max-inline: {reading_max_inline};
+  --chromapaw-reading-margin-start: {reading_margin_start};
+  --chromapaw-reading-margin-end: {reading_margin_end};
 }}"""
 
 
@@ -539,6 +558,46 @@ main.main-surface {
   background-image: var(--chromapaw-content-veil) !important;
 }
 
+/*
+ * Real Codex conversations are wider than Skin Studio's preview cards. Give
+ * every visible turn its own local glass carrier so copy never disappears
+ * across a staged subject. Stable data attributes are used instead of host
+ * utility-class names, which change between Codex builds.
+ */
+[data-thread-find-target] [data-turn-key] {
+  position: relative;
+  isolation: isolate;
+  inline-size: 100%;
+  max-inline-size: var(--chromapaw-reading-max-inline);
+  margin-inline-start: var(--chromapaw-reading-margin-start);
+  margin-inline-end: var(--chromapaw-reading-margin-end);
+  border-radius: 18px;
+}
+
+[data-thread-find-target] [data-turn-key]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  inset: -5px -12px;
+  border: 1px solid var(--chromapaw-reading-border);
+  border-radius: inherit;
+  background: var(--chromapaw-reading-surface);
+  box-shadow: 0 12px 30px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(16px) saturate(112%);
+  backdrop-filter: blur(16px) saturate(112%);
+}
+
+/* Keep the sticky composer independently readable over foreground artwork. */
+[data-thread-scroll-footer] [data-pip-obstacle] {
+  border-radius: 20px;
+  background: var(--chromapaw-reading-surface-strong);
+  border: 1px solid var(--chromapaw-reading-border);
+  box-shadow: 0 16px 38px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(18px) saturate(112%);
+  backdrop-filter: blur(18px) saturate(112%);
+}
+
 [data-avatar-mascot="true"],
 [data-avatar-overlay-hit-region="mascot"],
 .codex-avatar-button {
@@ -669,10 +728,22 @@ main.main-surface {
     -webkit-backdrop-filter: blur(20px) saturate(108%);
     backdrop-filter: blur(20px) saturate(108%);
   }
+
+  [data-thread-find-target] [data-turn-key]::before {
+    inset-inline: -8px;
+    background: var(--chromapaw-reading-surface-strong);
+  }
+}
+
+@media (max-width: 760px) {
+  [data-thread-find-target] [data-turn-key] {
+    max-inline-size: 100%;
+    margin-inline: 0;
+  }
 }
 """
     return (
-        "/* ChromaPaw Skin Studio v0.4.7 scene-fidelity stylesheet. Activation requires a compatible runtime. */\n"
+        "/* ChromaPaw Skin Studio v0.4.8 scene-fidelity stylesheet. Activation requires a compatible runtime. */\n"
         + "\n\n".join(blocks)
         + common
     )
