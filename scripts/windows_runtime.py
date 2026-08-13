@@ -33,7 +33,10 @@ except ImportError:
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.8"
+RUNTIME_VERSION = "0.4.9"
+# Keep the compiled CSS identity stable across launcher-only runtime releases.
+# Increment this only when the compiler output intentionally changes.
+CSS_IDENTITY_VERSION = "0.4.8"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ADAPTERS = ROOT / "runtime" / "windows-adapters.json"
 ACTIVE_FILE = "active.json"
@@ -818,7 +821,9 @@ def compile_skin(package_dir: Path) -> dict[str, Any]:
     compiled, replacements = BACKGROUND_URL.subn(f'url("{data_uri}")', css)
     if replacements < 1:
         raise RuntimeFailure("stylesheet does not contain the expected package background URL")
-    compiled += f"\n/* ChromaPaw runtime {RUNTIME_VERSION}; package {manifest['id']} */\n"
+    compiled += (
+        f"\n/* ChromaPaw runtime {CSS_IDENTITY_VERSION}; package {manifest['id']} */\n"
+    )
     css_hash = hashlib.sha256(compiled.encode("utf-8")).hexdigest()
     return {
         "packageDir": root,
@@ -1082,6 +1087,10 @@ def remember_preference(data_dir: Path, state: dict[str, Any]) -> dict[str, Any]
         "applicationFilesModified": False,
         "codexConfigModified": False,
     }
+    for field in ("runtimeBundleHash", "runtimeGeneration"):
+        value = state.get(field)
+        if isinstance(value, str) and value:
+            preference[field] = value
     atomic_json(data_dir / PREFERENCE_FILE, preference)
     return preference
 
@@ -1128,6 +1137,10 @@ def refresh_preference_for_runtime_update(
                 + ", ".join(changed)
             )
         previous_css_hash = preference["cssHash"]
+        for field in ("runtimeBundleHash", "runtimeGeneration"):
+            value = preference.get(field)
+            if isinstance(value, str) and value:
+                preflight[field] = value
         refreshed = remember_preference(data_dir, preflight)
         result = {
             "ok": True,
@@ -1551,6 +1564,15 @@ def activate_runtime(
                     "the port closes when the runtime-launched Codex process stops."
                 ),
             }
+            hosted_bundle_hash = os.environ.get("CHROMAPAW_HOSTED_BUNDLE_HASH")
+            hosted_generation = os.environ.get("CHROMAPAW_HOSTED_GENERATION")
+            if (
+                isinstance(hosted_bundle_hash, str)
+                and SHA256_PATTERN.fullmatch(hosted_bundle_hash)
+                and hosted_generation == f"sha256-{hosted_bundle_hash}"
+            ):
+                state["runtimeBundleHash"] = hosted_bundle_hash
+                state["runtimeGeneration"] = hosted_generation
             atomic_json(active_path, state)
             atomic_json(backup_active_path, state)
             monitor = _launch_monitor(data_dir, session_id)

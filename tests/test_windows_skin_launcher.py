@@ -95,6 +95,37 @@ class WindowsSkinLauncherTests(unittest.TestCase):
             confirm.assert_not_called()
             close.assert_not_called()
 
+    def test_runtime_failure_opens_verified_plain_codex_without_error_dialog(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            with mock.patch.object(sys, "argv", ["windows_skin_launcher.py"]), mock.patch(
+                "windows_skin_launcher.runtime_data_dir", return_value=data_dir
+            ), mock.patch(
+                "windows_skin_launcher.runtime_status",
+                return_value={"ok": True, "status": "inactive"},
+            ), mock.patch(
+                "windows_skin_launcher._read_preference",
+                return_value={"executable": "C:/fixture/ChatGPT.exe"},
+            ), mock.patch(
+                "windows_skin_launcher.running_pids", return_value=[]
+            ), mock.patch(
+                "windows_skin_launcher.resume_runtime",
+                side_effect=windows_skin_launcher.RuntimeFailure("cssHash changed"),
+            ), mock.patch(
+                "windows_skin_launcher._launch_verified_plain_codex",
+                return_value={"launched": True, "pid": 123},
+            ) as fallback, mock.patch(
+                "windows_skin_launcher._show_error"
+            ) as show_error:
+                result = windows_skin_launcher.main()
+
+            self.assertEqual(result, 0)
+            fallback.assert_called_once_with(data_dir)
+            show_error.assert_not_called()
+            event = (data_dir / "launcher.jsonl").read_text(encoding="utf-8")
+            self.assertIn("launcher-fallback-plain-codex", event)
+            self.assertIn("cssHash changed", event)
+
 
 if __name__ == "__main__":
     unittest.main()

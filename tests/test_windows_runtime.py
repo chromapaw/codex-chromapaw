@@ -1318,6 +1318,16 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertNotIn('url("./background.png")', compiled["css"])
             self.assertRegex(compiled["cssHash"], r"^[0-9a-f]{64}$")
 
+    def test_launcher_only_runtime_upgrade_keeps_compiled_css_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            package = make_v2_package(Path(temporary))
+            before = compile_skin(package)
+            with mock.patch("windows_runtime.RUNTIME_VERSION", "99.0.0"):
+                after = compile_skin(package)
+
+            self.assertEqual(after["cssHash"], before["cssHash"])
+            self.assertEqual(after["css"], before["css"])
+
     def test_monitor_repairs_unstyled_target_and_exits_with_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, FakeCdpServer() as server:
             root = Path(temporary)

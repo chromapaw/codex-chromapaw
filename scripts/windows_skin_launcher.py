@@ -8,6 +8,7 @@ import contextlib
 import ctypes
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,6 +33,7 @@ try:
         running_pids,
         runtime_data_dir,
         runtime_status,
+        sha256_file,
         utc_now,
     )
 except ImportError:
@@ -45,6 +47,7 @@ except ImportError:
         running_pids,
         runtime_data_dir,
         runtime_status,
+        sha256_file,
         utc_now,
     )
 
@@ -66,6 +69,31 @@ def _show_error(message: str) -> None:
             "ChromaPaw could not start Codex",
             0x00000010,
         )
+
+
+def _launch_verified_plain_codex(data_dir: Path) -> dict[str, object] | None:
+    """Open normal Codex when skin startup fails, without trusting a changed path."""
+    try:
+        preference = _read_preference(data_dir)
+        if preference is None:
+            return None
+        executable = Path(preference["executable"]).expanduser().resolve()
+        if (
+            not executable.is_file()
+            or sha256_file(executable) != preference.get("executableHash")
+        ):
+            return None
+        process = subprocess.Popen(
+            [str(executable)],
+            cwd=executable.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+        return {"launched": True, "pid": process.pid, "executable": str(executable)}
+    except (OSError, RuntimeFailure, ValueError, KeyError):
+        return None
 
 
 def _confirm_close_running(executable: Path, pids: list[int]) -> bool:
@@ -141,15 +169,22 @@ def main() -> int:
         _append_log(data_dir, event)
         return 0
     except (OSError, RuntimeFailure, ValueError) as exc:
+        fallback = _launch_verified_plain_codex(data_dir)
         event = {
             "time": utc_now(),
-            "event": "launcher-failed",
+            "event": "launcher-fallback-plain-codex" if fallback else "launcher-failed",
             "error": str(exc),
+            "fallback": fallback,
         }
         with contextlib.suppress(OSError):
             _append_log(data_dir, event)
+        if fallback:
+            return 0
         if not args.no_error_dialog:
-            _show_error(str(exc))
+            _show_error(
+                "ChromaPaw could not load the saved skin, and Codex could not be opened "
+                "automatically. Open Codex normally, then repair the ChromaPaw shortcut."
+            )
         return 1
 
 

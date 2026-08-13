@@ -16,11 +16,19 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .windows_runtime import RuntimeFailure, atomic_json, runtime_data_dir, sha256_file, utc_now
+    from .windows_runtime import (
+        RuntimeFailure,
+        atomic_json,
+        build_preflight,
+        runtime_data_dir,
+        sha256_file,
+        utc_now,
+    )
 except ImportError:
     from windows_runtime import (  # type: ignore
         RuntimeFailure,
         atomic_json,
+        build_preflight,
         runtime_data_dir,
         sha256_file,
         utc_now,
@@ -48,6 +56,7 @@ import ctypes
 import json
 import os
 import runpy
+import subprocess
 import sys
 import hashlib
 from pathlib import Path
@@ -64,10 +73,88 @@ def _fail(message: str) -> int:
     return 1
 
 
+def _explicit_data_dir_from_arguments() -> Path | None:
+    try:
+        index = sys.argv.index("--data-dir")
+        return Path(sys.argv[index + 1]).expanduser().resolve()
+    except (ValueError, IndexError):
+        explicit = os.environ.get("CHROMAPAW_DATA_DIR")
+        return Path(explicit).expanduser().resolve() if explicit else None
+
+
+def _fallback_plain_codex(message: str) -> bool:
+    """Keep the shortcut useful without trusting a changed executable."""
+    try:
+        data_dir = _explicit_data_dir_from_arguments()
+        if data_dir is None:
+            return False
+        preference = json.loads(
+            (data_dir / "preferred-skin.json").read_text(encoding="utf-8")
+        )
+        executable = Path(str(preference["executable"])).expanduser().resolve()
+        expected_hash = preference.get("executableHash")
+        if not executable.is_file() or not isinstance(expected_hash, str):
+            return False
+        digest = hashlib.sha256()
+        with executable.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_hash:
+            return False
+        process = subprocess.Popen(
+            [str(executable)],
+            cwd=executable.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+        log = data_dir / "launcher.jsonl"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8", newline="\\n") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "event": "bootstrap-fallback-plain-codex",
+                        "error": message,
+                        "pid": process.pid,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\\n"
+            )
+        return True
+    except Exception:
+        return False
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     try:
-        state = json.loads((root / "current.json").read_text(encoding="utf-8"))
+        current = json.loads((root / "current.json").read_text(encoding="utf-8"))
+        state = current
+        data_dir = _explicit_data_dir_from_arguments()
+        preference = None
+        if data_dir is not None:
+            preference_path = data_dir / "preferred-skin.json"
+            try:
+                preference = json.loads(preference_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                preference = None
+        if isinstance(preference, dict):
+            pinned_generation = preference.get("runtimeGeneration")
+            pinned_bundle_hash = preference.get("runtimeBundleHash")
+            if (
+                isinstance(pinned_generation, str)
+                and isinstance(pinned_bundle_hash, str)
+                and pinned_generation == f"sha256-{pinned_bundle_hash}"
+            ):
+                state = {
+                    "schemaVersion": 1,
+                    "generation": pinned_generation,
+                    "bundleHash": pinned_bundle_hash,
+                }
         if not isinstance(state, dict) or state.get("schemaVersion") != 1:
             raise RuntimeError("hosted runtime current pointer is invalid")
         generation_name = state.get("generation")
@@ -153,13 +240,23 @@ def main() -> int:
             raise RuntimeError("hosted runtime files are incomplete; reinstall the shortcuts")
         sys.dont_write_bytecode = True
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+        os.environ["CHROMAPAW_HOSTED_GENERATION"] = generation_name
+        os.environ["CHROMAPAW_HOSTED_BUNDLE_HASH"] = str(manifest["bundleHash"])
         sys.path.insert(0, str(launcher.parent))
         sys.argv = [str(launcher), "--adapters", str(adapters), *sys.argv[1:]]
         runpy.run_path(str(launcher), run_name="__main__")
         return 0
     except SystemExit as exc:
-        return int(exc.code or 0)
+        try:
+            code = int(exc.code or 0)
+        except (TypeError, ValueError):
+            code = 1
+        if code == 0 or not _fallback_plain_codex(f"hosted launcher exited with code {code}"):
+            return code
+        return 0
     except Exception as exc:
+        if _fallback_plain_codex(str(exc)):
+            return 0
         return _fail(str(exc))
 
 
@@ -525,6 +622,62 @@ def _hosted_runtime_status(receipt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bind_preference_to_hosted_runtime(
+    data_dir: Path,
+    hosted_runtime: dict[str, Any],
+    *,
+    upgrade_reviewed_runtime: bool = False,
+) -> dict[str, Any] | None:
+    """Pin a reviewed skin to one immutable hosted runtime generation."""
+    preference_path = data_dir / "preferred-skin.json"
+    if not preference_path.is_file():
+        return None
+    try:
+        preference = json.loads(preference_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeFailure(f"preferred skin state cannot be read: {exc}") from exc
+    if not isinstance(preference, dict) or preference.get("schemaVersion") != 1:
+        raise RuntimeFailure("preferred skin state is invalid")
+    existing_generation = preference.get("runtimeGeneration")
+    existing_hash = preference.get("runtimeBundleHash")
+    if isinstance(existing_generation, str) or isinstance(existing_hash, str):
+        if existing_generation != f"sha256-{existing_hash}":
+            raise RuntimeFailure("preferred skin runtime generation identity is invalid")
+        if not upgrade_reviewed_runtime:
+            return preference
+    generation = hosted_runtime.get("generation")
+    bundle_hash = hosted_runtime.get("bundleHash")
+    if generation != f"sha256-{bundle_hash}":
+        raise RuntimeFailure("hosted runtime generation identity is invalid")
+    generation_dir = Path(str(hosted_runtime.get("generationDir", ""))).resolve()
+    preflight = build_preflight(
+        Path(str(preference.get("package", ""))),
+        Path(str(preference.get("executable", ""))),
+        generation_dir / "runtime" / "windows-adapters.json",
+    )
+    continuity_fields = (
+        "executableHash",
+        "manifestHash",
+        "cssHash",
+        "adapterFileHash",
+        "adapterId",
+        "appVersion",
+    )
+    changed = sorted(
+        field for field in continuity_fields if preflight.get(field) != preference.get(field)
+    )
+    if changed:
+        raise RuntimeFailure(
+            "preferred skin does not match the hosted runtime candidate; "
+            "activate it again after reviewing changes: " + ", ".join(changed)
+        )
+    preference["runtimeGeneration"] = generation
+    preference["runtimeBundleHash"] = bundle_hash
+    preference["runtimePinnedAt"] = utc_now()
+    atomic_json(preference_path, preference)
+    return preference
+
+
 def _finalize_receipt(data_dir: Path, receipt: dict[str, Any], status: str) -> dict[str, Any]:
     result = {**receipt, "status": status, "restoredAt": utc_now()}
     atomic_json(data_dir / "start-menu-shortcut.restored.json", result)
@@ -564,6 +717,7 @@ def install_shortcut(
     adapters: Path,
     *,
     acknowledged: bool,
+    upgrade_reviewed_runtime: bool = False,
     original_shortcut: Path | None = None,
     desktop_shortcut: Path | None = None,
 ) -> dict[str, Any]:
@@ -648,6 +802,10 @@ def install_shortcut(
         path: path.read_bytes() if path.is_file() else None
         for path in (hosted_root / "bootstrap.py", hosted_root / "current.json")
     }
+    preference_path = data_dir / "preferred-skin.json"
+    preference_snapshot = (
+        preference_path.read_bytes() if preference_path.is_file() else None
+    )
     hosted_runtime = _install_hosted_runtime(data_dir, adapters)
     hosted_bootstrap = Path(hosted_runtime["bootstrap"])
     arguments = subprocess.list2cmdline(
@@ -660,6 +818,11 @@ def install_shortcut(
     )
     result: dict[str, Any] | None = None
     try:
+        _bind_preference_to_hosted_runtime(
+            data_dir,
+            hosted_runtime,
+            upgrade_reviewed_runtime=upgrade_reviewed_runtime,
+        )
         installed_entries = []
         for kind, path in managed_paths.items():
             _write_shortcut(
@@ -708,6 +871,7 @@ def install_shortcut(
             _restore_optional_bytes(path, content)
         for path, content in hosted_snapshots.items():
             _restore_optional_bytes(path, content)
+        _restore_optional_bytes(preference_path, preference_snapshot)
         raise
     assert result is not None
     return result
@@ -845,6 +1009,14 @@ def main() -> int:
     )
     install.add_argument("--acknowledge-adds-windows-shortcuts", action="store_true")
     install.add_argument(
+        "--upgrade-reviewed-runtime",
+        action="store_true",
+        help=(
+            "move an existing reviewed skin to the newly installed immutable runtime only "
+            "after all continuity identities match"
+        ),
+    )
+    install.add_argument(
         "--acknowledge-replaces-start-menu-shortcut",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -862,6 +1034,7 @@ def main() -> int:
                 args.executable,
                 args.adapters,
                 acknowledged=args.acknowledge_adds_windows_shortcuts,
+                upgrade_reviewed_runtime=args.upgrade_reviewed_runtime,
                 original_shortcut=args.original_shortcut,
                 desktop_shortcut=args.desktop_shortcut,
             )

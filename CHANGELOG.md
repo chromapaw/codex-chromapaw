@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Pin every reviewed Windows skin preference to the exact content-addressed hosted runtime generation used by its shortcut, so later plugin or adapter updates cannot invalidate a previously approved relaunch.
+- Keep the technical failure details in the local launcher log while opening the hash-verified ordinary Codex executable when skin recovery cannot start, instead of blocking users with adapter or CSS hash dialogs.
+- Preserve the pinned generation during shortcut upgrades and retain prior immutable generations for reviewed-skin continuity.
+- Decouple compiled skin identity from launcher-only runtime versions, preventing a code-only update from looking like a user skin edit.
+
 ## 0.4.6 — 2026-08-13
 
 - Recompute the hosted shortcut runtime's canonical bundle identity at every launch, reject coherent file-plus-manifest tampering, linked or unlisted files, and bind the result to both the current pointer and content-addressed generation name.
