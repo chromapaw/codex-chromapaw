@@ -66,6 +66,15 @@
 - Make Windows status and CSS updates continuity-aware and compensating on failure.
 - Validate schemas, external workflow contracts, and isolated installation in the release gate.
 
+## 0.4.7 — Adaptive layout and open-source readiness (release candidate)
+
+- Decide conversation width from subject role and display priority instead of subject position alone.
+- Keep supporting scenery at the default Codex width and reserve space only for a side-staged showcase subject.
+- Protect the current Codex header and system menu with image-derived, contrast-checked surfaces and controls.
+- Make reviewed CSS monitor updates wait for the matching transactional state handoff.
+- Add complete community, support, issue, ownership, dependency, security, and release automation surfaces.
+- Pin GitHub Actions to reviewed commits and publish archives, checksums, and an SPDX SBOM from validated tags.
+
 ## 0.4.x — Runtime hardening
 
 - Add adapters only after exact-version isolated live verification.

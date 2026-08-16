@@ -337,16 +337,20 @@ def _validate_v2(root: Path, data: dict[str, Any], errors: list[str]) -> None:
             if not isinstance(treatment, dict):
                 errors.append("layout.visualTreatment must be an object")
             else:
-                treatment_keys = {
+                treatment_required_keys = {
                     "sceneFidelity",
                     "contentProtection",
                     "subjectPlacement",
                     "artworkRecomposed",
                     "globalWashOpacity",
                 }
+                treatment_keys = treatment_required_keys | {
+                    "subjectDisplayPriority",
+                    "contentLayout",
+                }
                 _check_fields(
                     treatment,
-                    treatment_keys,
+                    treatment_required_keys,
                     treatment_keys,
                     "layout.visualTreatment",
                     errors,
@@ -365,6 +369,29 @@ def _validate_v2(root: Path, data: dict[str, Any], errors: list[str]) -> None:
                 }:
                     errors.append(
                         "layout.visualTreatment.subjectPlacement must be source, left, right, or edge-balanced"
+                    )
+                if (
+                    "subjectDisplayPriority" in treatment
+                    and treatment.get("subjectDisplayPriority")
+                    not in {"ambient", "supporting", "showcase"}
+                ):
+                    errors.append(
+                        "layout.visualTreatment.subjectDisplayPriority must be ambient, supporting, or showcase"
+                    )
+                if (
+                    "contentLayout" in treatment
+                    and treatment.get("contentLayout")
+                    not in {"default", "reserve-subject"}
+                ):
+                    errors.append(
+                        "layout.visualTreatment.contentLayout must be default or reserve-subject"
+                    )
+                if (
+                    treatment.get("contentLayout") == "reserve-subject"
+                    and treatment.get("subjectPlacement") not in {"left", "right"}
+                ):
+                    errors.append(
+                        "layout.visualTreatment reserve-subject requires left or right subjectPlacement"
                     )
                 if not isinstance(treatment.get("artworkRecomposed"), bool):
                     errors.append(

@@ -64,6 +64,9 @@ python scripts/smoke_test_install.py --source . --ref= --json
 ## Publication
 
 - Ensure the worktree is clean and `CHANGELOG.md` matches the manifest's release version; local `+codex.<cachebuster>` build metadata does not create a separate public release.
-- Tag `v<manifest-version>` only after the candidate commit passes CI.
+- Create an annotated `v<manifest-version>` tag only after the candidate commit passes CI and is reachable from `main`; sign the tag when a maintainer signing identity is available.
+- Let `.github/workflows/release.yml` re-run the release gate and isolated installation before publication.
+- Verify that the release contains deterministic zip and tar archives, an SPDX JSON SBOM, and `SHA256SUMS.txt`.
 - Publish release notes that name exact live-tested Codex versions and all known unsupported routes.
 - Re-run the isolated GitHub installation smoke test against the published tag.
+- Re-audit the branch, security, discussion, and release settings in [GitHub maintainer setup](GITHUB_MAINTAINER_SETUP.md).

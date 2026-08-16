@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible ChromaPaw problem without sharing private content.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve ChromaPaw. Remove local paths, task names, tokens, private artwork, and runtime secrets before submitting.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Skin generation or validation
+        - Pet generation or validation
+        - Pet installation or selection
+        - Windows activation or shortcut
+        - macOS compatibility probe
+        - Installation or update
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: chromapaw-version
+    attributes:
+      label: ChromaPaw version
+      description: Copy the version from `codex plugin list` or `.codex-plugin/plugin.json`.
+      placeholder: 0.4.6+codex.example
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and Codex version
+      placeholder: Windows 11 24H2, Codex 26.x.x.x
+    validations:
+      required: true
+  - type: textarea
+    id: capability-report
+    attributes:
+      label: Sanitized capability report
+      description: Paste relevant fields from `python scripts/platform_capabilities.py --json`. Remove absolute paths and hashes if they identify private files.
+      render: json
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Attach ...
+        2. Run ...
+        3. Confirm ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized diagnostics
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed private images, task text, local paths, access tokens, CDP endpoints, and other secrets.
+          required: true
+        - label: I understand package generation is separate from installation and live activation.
+          required: true

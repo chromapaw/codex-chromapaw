@@ -33,7 +33,7 @@ except ImportError:
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.9"
+RUNTIME_VERSION = "0.4.10"
 # Keep the compiled CSS identity stable across launcher-only runtime releases.
 # Increment this only when the compiler output intentionally changes.
 CSS_IDENTITY_VERSION = "0.4.8"
@@ -1260,7 +1260,11 @@ def _launch_codex(
         raise RuntimeFailure(f"Codex could not be launched: {exc}") from exc
 
 
-def _launch_monitor(data_dir: Path, session_id: str) -> subprocess.Popen[bytes]:
+def _launch_monitor(
+    data_dir: Path,
+    session_id: str,
+    expected_css_hash: str | None = None,
+) -> subprocess.Popen[bytes]:
     args = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -1270,6 +1274,10 @@ def _launch_monitor(data_dir: Path, session_id: str) -> subprocess.Popen[bytes]:
         "--session-id",
         session_id,
     ]
+    if expected_css_hash is not None:
+        if not SHA256_PATTERN.fullmatch(expected_css_hash):
+            raise RuntimeFailure("runtime monitor expected CSS hash is invalid")
+        args.extend(("--expected-css-hash", expected_css_hash))
     creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
         subprocess, "CREATE_NO_WINDOW", 0
     )
@@ -1357,7 +1365,13 @@ def _terminate_monitor_process(state: dict[str, Any], timeout: float = 8.0) -> d
     )
 
 
-def monitor_runtime(data_dir: Path, session_id: str, interval: float = 1.0) -> int:
+def monitor_runtime(
+    data_dir: Path,
+    session_id: str,
+    interval: float = 1.0,
+    expected_css_hash: str | None = None,
+    startup_wait_seconds: float = 5.0,
+) -> int:
     """Keep newly-created Codex windows synchronized until the session stops."""
     log_path: Path | None = None
     try:
@@ -1366,7 +1380,21 @@ def monitor_runtime(data_dir: Path, session_id: str, interval: float = 1.0) -> i
             return 2
         log_path = Path(str(state["backupDir"])) / "monitor.jsonl"
         compiled = compile_skin(Path(str(state["package"])))
-        if compiled["cssHash"] != state.get("cssHash"):
+        compiled_css_hash = str(compiled["cssHash"])
+        if expected_css_hash is not None:
+            if not SHA256_PATTERN.fullmatch(expected_css_hash):
+                raise RuntimeFailure("runtime monitor expected CSS hash is invalid")
+            if compiled_css_hash != expected_css_hash:
+                raise RuntimeFailure("reviewed CSS changed before monitor startup")
+            deadline = time.monotonic() + max(0.5, startup_wait_seconds)
+            while state.get("cssHash") != expected_css_hash:
+                if time.monotonic() >= deadline:
+                    raise RuntimeFailure("CSS refresh state was not committed before monitor startup")
+                time.sleep(0.05)
+                state = _read_active(data_dir)
+                if state is None or state.get("sessionId") != session_id:
+                    return 2
+        elif compiled_css_hash != state.get("cssHash"):
             raise RuntimeFailure("skin package changed after monitor startup")
         endpoint = CdpEndpoint(int(state["port"]), timeout=4.0)
         adapter = _adapter_for_state(state)
@@ -1838,7 +1866,11 @@ def refresh_active_runtime_css(
                 8.0,
                 settle_seconds=0.5,
             )
-            monitor = _launch_monitor(data_dir, str(state["sessionId"]))
+            monitor = _launch_monitor(
+                data_dir,
+                str(state["sessionId"]),
+                str(compiled["cssHash"]),
+            )
             new_monitor = {
                 "monitorPid": monitor.pid,
                 "monitorExecutable": str(Path(sys.executable).resolve()),
@@ -2336,7 +2368,14 @@ def capture_runtime_screenshot(data_dir: Path, output: Path, acknowledged: bool)
 
 def _print_result(value: object, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(value, ensure_ascii=False, indent=2))
+        payload = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+        try:
+            sys.stdout.write(payload)
+        except UnicodeEncodeError:
+            # One-shot launchers may inherit a legacy Windows console encoding.
+            # Preserve structured output rather than failing after an otherwise
+            # successful state transition.
+            sys.stdout.buffer.write(payload.encode("utf-8"))
     elif isinstance(value, dict):
         print(value.get("status") or value.get("output") or "OK")
     else:
@@ -2409,6 +2448,7 @@ def main() -> int:
 
     monitor_parser = subparsers.add_parser("monitor", help=argparse.SUPPRESS)
     monitor_parser.add_argument("--session-id", required=True)
+    monitor_parser.add_argument("--expected-css-hash")
 
     args = parser.parse_args()
     data_dir = runtime_data_dir(args.data_dir)
@@ -2464,13 +2504,17 @@ def main() -> int:
                 args.acknowledge_screenshot_may_contain_private_content,
             )
         elif args.command == "monitor":
-            return monitor_runtime(data_dir, args.session_id)
+            return monitor_runtime(
+                data_dir,
+                args.session_id,
+                expected_css_hash=args.expected_css_hash,
+            )
         else:  # pragma: no cover
             raise RuntimeFailure(f"unsupported command: {args.command}")
     except (CdpError, OSError, RuntimeFailure, ValueError) as exc:
         result = {"ok": False, "command": args.command, "error": str(exc)}
         if args.json:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            _print_result(result, True)
         else:
             print(f"ERROR: {exc}", file=sys.stderr)
         return 1

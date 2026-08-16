@@ -47,6 +47,8 @@ class SkinInputMatrixTests(unittest.TestCase):
                         ("sidePanelText", "sidePanelSurface"),
                         ("sidePanelSecondaryText", "sidePanelSurface"),
                         ("sidePanelSectionText", "sidePanelSectionSurface"),
+                        ("titleBarText", "titleBarSurface"),
+                        ("titleBarSecondaryText", "titleBarSurface"),
                     ):
                         self.assertGreaterEqual(
                             contrast_ratio(ui[surface_role], ui[role]),

@@ -1,6 +1,6 @@
 {
   "name": "codex-chromapaw",
-  "version": "0.4.6+codex.20260813031213",
+  "version": "0.4.7+codex.20260816074801",
   "description": "Build one-image Codex skin or pet packages with explicit dependency and activation gates.",
   "author": {
     "name": "ChromaPaw Community",

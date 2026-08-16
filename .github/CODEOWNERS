@@ -1,0 +1,9 @@
+# Repository and release policy
+* @huanglianggit
+
+# Runtime adapters and security-sensitive launch paths
+/runtime/ @huanglianggit
+/scripts/windows_runtime.py @huanglianggit
+/scripts/windows_shortcut.py @huanglianggit
+/scripts/windows_skin_launcher.py @huanglianggit
+/.github/workflows/ @huanglianggit

@@ -1,6 +1,6 @@
 # Reversible Windows Runtime Beta
 
-ChromaPaw 0.4 can apply a validated Skin Studio v2 package to selected Windows Codex builds without modifying the application archive. Version 0.4.6 remembers that validated selection through separate reversible Desktop and Start Menu launchers and strengthens hosted-runtime integrity and recovery. This is an experimental compatibility layer, not an official OpenAI desktop skin API.
+ChromaPaw 0.4 can apply a validated Skin Studio v2 package to selected Windows Codex builds without modifying the application archive. Version 0.4.7 retains the reversible Desktop and Start Menu launchers, pins reviewed runtime generations, and makes CSS monitor refresh handoff tolerant of the transaction's expected state-commit window. This is an experimental compatibility layer, not an official OpenAI desktop skin API.
 
 Every activation candidate must match both its exact Codex application version and the adapter's executable-identity policy. ChromaPaw probes PE product metadata and Authenticode status and requires an enabled adapter to pin either an allowlisted SHA-256 or an exact signed file version plus signer. A renamed executable placed in a version-shaped directory fails closed.
 

@@ -86,6 +86,20 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError(
             "subject placement must be source, left, right, or edge-balanced"
         )
+    subject_display_priority = getattr(args, "subject_display_priority", "supporting")
+    if subject_display_priority not in {"ambient", "supporting", "showcase"}:
+        raise ValueError(
+            "subject display priority must be ambient, supporting, or showcase"
+        )
+    content_layout = getattr(args, "content_layout", "auto")
+    if content_layout not in {"auto", "default", "reserve-subject"}:
+        raise ValueError(
+            "content layout must be auto, default, or reserve-subject"
+        )
+    if content_layout == "reserve-subject" and subject_placement not in {"left", "right"}:
+        raise ValueError(
+            "reserve-subject content layout requires left or right subject placement"
+        )
     artwork_recomposed = artwork != reference
 
     return {
@@ -102,6 +116,8 @@ def build_request(args: argparse.Namespace) -> dict[str, object]:
             "sceneFidelity": "preserve",
             "contentProtection": "local-surfaces",
             "subjectPlacement": subject_placement,
+            "subjectDisplayPriority": subject_display_priority,
+            "contentLayout": content_layout,
             "artworkRecomposed": artwork_recomposed,
             "globalWashMaximum": 0.12,
         },
@@ -140,8 +156,26 @@ def main() -> int:
         choices=("source", "left", "right", "edge-balanced"),
         default="source",
         help=(
-            "Where the approved artwork keeps its main subject. Use left or right "
-            "after safe-zone recomposition so the reading veil protects the opposite side."
+            "Where the approved artwork keeps its main subject. This controls image "
+            "positioning and the reading veil, not conversation width by itself."
+        ),
+    )
+    parser.add_argument(
+        "--subject-display-priority",
+        choices=("ambient", "supporting", "showcase"),
+        default="supporting",
+        help=(
+            "How important it is to keep the subject unobstructed. Only showcase subjects "
+            "reserve side space when content layout is auto."
+        ),
+    )
+    parser.add_argument(
+        "--content-layout",
+        choices=("auto", "default", "reserve-subject"),
+        default="auto",
+        help=(
+            "Conversation width policy. Auto reserves space only for a showcase subject "
+            "staged on the left or right; default keeps normal Codex width."
         ),
     )
     parser.add_argument("--author", default="User-provided reference")

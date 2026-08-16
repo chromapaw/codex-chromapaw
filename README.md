@@ -2,9 +2,38 @@
 
 Turn one uploaded image into an image-specific Codex skin or animated pet.
 
-> Version 0.4.6 hardens one-image generation handoffs, pet selection, hosted shortcuts, and Windows runtime recovery. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
+[![CI](https://github.com/chromapaw/codex-chromapaw/actions/workflows/ci.yml/badge.svg)](https://github.com/chromapaw/codex-chromapaw/actions/workflows/ci.yml)
+[![macOS enhanced compatibility](https://github.com/chromapaw/codex-chromapaw/actions/workflows/macos-enhanced.yml/badge.svg)](https://github.com/chromapaw/codex-chromapaw/actions/workflows/macos-enhanced.yml)
+[![Latest release](https://img.shields.io/github/v/release/chromapaw/codex-chromapaw?display_name=tag&sort=semver)](https://github.com/chromapaw/codex-chromapaw/releases/latest)
+[![License](https://img.shields.io/github/license/chromapaw/codex-chromapaw)](LICENSE)
+[![Project status: beta](https://img.shields.io/badge/status-beta-f59e0b)](ROADMAP.md)
 
-[中文说明](#中文说明) · [Skin Studio](docs/SKIN_STUDIO_MVP.md) · [Pet MVP](docs/PET_MVP.md) · [Windows Runtime Beta](docs/WINDOWS_RUNTIME_BETA.md) · [macOS probe](docs/MACOS_COMPATIBILITY.md) · [Release checklist](docs/RELEASE_CHECKLIST.md) · [Roadmap](ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md)
+> Version 0.4.7 adds image-aware content-width decisions, safer runtime CSS handoff, Codex header contrast protection, and a complete open-source contribution and release surface. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
+
+> [!IMPORTANT]
+> ChromaPaw is a community beta. Skin and pet package generation is portable, but live skin activation is not: Windows activation is experimental and exact-version gated, while macOS activation is not implemented.
+
+[中文说明](#中文说明) · [Install](#install) · [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Releases](https://github.com/chromapaw/codex-chromapaw/releases) · [Roadmap](ROADMAP.md)
+
+## What ChromaPaw provides
+
+| Workflow | Output | Separate user confirmation |
+| --- | --- | --- |
+| One-image skin | Semantic theme profile, layered artwork, adaptive CSS, six previews, validated portable package | Required before supported live activation |
+| One-image pet | Identity-preserving 8×11 animated desktop-pet package with visual and direction QA | Required before install, replacement, and selection |
+| Management | Compatibility status, verification, recovery, restore, and removal tools | Required before runtime or filesystem changes |
+
+```mermaid
+flowchart LR
+    A["Upload one image"] --> B{"Choose skin or pet"}
+    B -->|Skin| C["Analyze motifs, palette, depth, and safe zones"]
+    B -->|Pet| D["Preserve identity across task-state animation"]
+    C --> E["Preview and validate package"]
+    D --> E
+    E --> F{"Platform supports next step?"}
+    F -->|Yes, after confirmation| G["Install or activate"]
+    F -->|No| H["Keep portable package and report limitation"]
+```
 
 ## One-image workflow
 
@@ -28,7 +57,7 @@ For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing 
 | Skin relaunch after closing Codex | Explicit, reversible ChromaPaw Desktop and Start Menu shortcuts | Not implemented |
 | Compatibility discovery | Implemented | Read-only probe and enhanced cloud harness implemented |
 
-On the current Windows development machine, standalone Codex `26.707.9981.0` has an enabled experimental adapter. Recently discovered official AppX builds do not have an enabled adapter; the registry retains `26.803.5235.0` only as a historical disabled probe record. Unknown versions fail closed.
+The registry currently enables only the separately reviewed standalone Codex `26.707.9981.0` adapter. Official AppX builds remain activation-disabled, and unknown versions fail closed. Run `python scripts/platform_capabilities.py --json` for the current machine instead of inferring support from the operating system alone.
 
 ## Capabilities
 
@@ -95,6 +124,8 @@ python scripts/audit_pets.py --json --allow-issues
 ```
 
 See [the release checklist](docs/RELEASE_CHECKLIST.md) for real-image, clean-install, and exact-version platform gates.
+
+Questions belong in [GitHub Discussions](https://github.com/chromapaw/codex-chromapaw/discussions). Reproducible bugs and compatibility reports use the repository's structured issue forms. Vulnerabilities must use [private reporting](https://github.com/chromapaw/codex-chromapaw/security/advisories/new), not a public issue.
 
 ### Uninstall
 

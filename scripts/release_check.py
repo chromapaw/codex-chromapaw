@@ -38,6 +38,24 @@ SCHEMA_CONTRACTS = (
         "runtime/macos-adapters.json",
     ),
 )
+REPOSITORY_POLICY_FILES = (
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "docs/GITHUB_MAINTAINER_SETUP.md",
+    ".github/CODEOWNERS",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/dependabot.yml",
+    ".github/ISSUE_TEMPLATE/config.yml",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+    ".github/ISSUE_TEMPLATE/compatibility_report.yml",
+    ".github/ISSUE_TEMPLATE/feature_request.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/macos-enhanced.yml",
+    ".github/workflows/release.yml",
+)
+PINNED_ACTION = re.compile(r"^[^\s@]+/[^\s@]+@[0-9a-f]{40}$")
 
 
 class ReleaseCheckError(RuntimeError):
@@ -93,6 +111,40 @@ def validate_schema_contracts() -> None:
         )
 
 
+def validate_repository_policies() -> None:
+    for relative in REPOSITORY_POLICY_FILES:
+        if not (ROOT / relative).is_file():
+            raise ReleaseCheckError(f"{relative} is missing")
+
+    github_root = ROOT / ".github"
+    yaml_paths = sorted((*github_root.rglob("*.yml"), *github_root.rglob("*.yaml")))
+    for path in yaml_paths:
+        relative = path.relative_to(ROOT)
+        try:
+            value = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise ReleaseCheckError(f"{relative} is invalid YAML: {exc}") from exc
+        if not isinstance(value, dict):
+            raise ReleaseCheckError(f"{relative} must contain a YAML mapping")
+
+    for workflow in sorted((github_root / "workflows").glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8")
+        for action in re.findall(r"^\s*uses:\s*([^\s#]+)", text, flags=re.MULTILINE):
+            if action.startswith("./") or action.startswith("docker://"):
+                continue
+            if not PINNED_ACTION.fullmatch(action):
+                raise ReleaseCheckError(
+                    f"{workflow.relative_to(ROOT)} uses an unpinned action: {action}"
+                )
+
+    release_workflow = (github_root / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    for marker in ("scripts/release_check.py", "scripts/smoke_test_install.py", "sbom-action@", "gh release create"):
+        if marker not in release_workflow:
+            raise ReleaseCheckError(f"release workflow is missing {marker}")
+
+
 def validate_repository() -> str:
     manifest = _load_json(".codex-plugin/plugin.json")
     if not isinstance(manifest, dict) or manifest.get("name") != ROOT.name:
@@ -111,6 +163,7 @@ def validate_repository() -> str:
         raise ReleaseCheckError("repository marketplace does not expose codex-chromapaw")
 
     validate_schema_contracts()
+    validate_repository_policies()
 
     for skill in SKILLS:
         path = ROOT / "skills" / skill / "SKILL.md"
@@ -154,13 +207,12 @@ def validate_repository() -> str:
                 )
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    if len(re.findall(r"^## Unreleased\s*$", changelog, flags=re.MULTILINE)) != 1:
+        raise ReleaseCheckError("CHANGELOG.md must contain exactly one Unreleased section")
     release_version = version.split("+", 1)[0]
     if not re.search(rf"^## {re.escape(release_version)}\b", changelog, flags=re.MULTILINE):
         raise ReleaseCheckError(f"CHANGELOG.md has no {release_version} release section")
-    if not (ROOT / ".github" / "workflows" / "ci.yml").is_file():
-        raise ReleaseCheckError(".github/workflows/ci.yml is missing")
     for relative in (
-        ".github/workflows/macos-enhanced.yml",
         "package.json",
         "package-lock.json",
         "scripts/macos_enhanced_test.py",
