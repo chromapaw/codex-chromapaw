@@ -31,8 +31,8 @@ While there is only one maintainer, use zero required external approvals so the 
 
 - Enable Dependency Graph and Dependabot alerts.
 - Enable Dependabot security updates.
-- Enable Secret Scanning, validity checks, and Push Protection.
-- Enable CodeQL default setup for Python, JavaScript/TypeScript, and GitHub Actions.
+- Enable Secret Scanning and Push Protection. Enable validity checks and non-provider patterns when the repository's GitHub plan exposes them, and record an unavailable toggle rather than claiming it is active.
+- Enable CodeQL default setup for Python and JavaScript/TypeScript; workflow YAML remains covered by the repository release gate and pinned-Action policy.
 - Enable private vulnerability reporting so `SECURITY.md` and the issue-template contact link resolve to a confidential channel.
 - Require organization two-factor authentication after confirming every member has enrolled.
 
