@@ -140,7 +140,14 @@ def validate_repository_policies() -> None:
     release_workflow = (github_root / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
-    for marker in ("scripts/release_check.py", "scripts/smoke_test_install.py", "sbom-action@", "gh release create"):
+    for marker in (
+        "scripts/release_check.py",
+        "scripts/smoke_test_install.py",
+        "actions/setup-node@",
+        "@openai/codex@0.144.2",
+        "sbom-action@",
+        "gh release create",
+    ):
         if marker not in release_workflow:
             raise ReleaseCheckError(f"release workflow is missing {marker}")
 
@@ -157,10 +164,22 @@ def validate_repository() -> str:
     if not isinstance(marketplace, dict) or marketplace.get("name") != "chromapaw":
         raise ReleaseCheckError("repository marketplace name must be chromapaw")
     plugins = marketplace.get("plugins")
-    if not isinstance(plugins, list) or not any(
-        isinstance(plugin, dict) and plugin.get("name") == ROOT.name for plugin in plugins
-    ):
+    if not isinstance(plugins, list):
+        raise ReleaseCheckError("repository marketplace plugins must be a list")
+    repository_plugin = next(
+        (
+            plugin
+            for plugin in plugins
+            if isinstance(plugin, dict) and plugin.get("name") == ROOT.name
+        ),
+        None,
+    )
+    if repository_plugin is None:
         raise ReleaseCheckError("repository marketplace does not expose codex-chromapaw")
+    if repository_plugin.get("source") != {"source": "local", "path": "."}:
+        raise ReleaseCheckError(
+            "repository marketplace must resolve codex-chromapaw from its selected snapshot root"
+        )
 
     validate_schema_contracts()
     validate_repository_policies()

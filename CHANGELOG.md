@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-## 0.4.7 — 2026-08-16
+## 0.4.7 — 2026-08-20
 
+- Resolve the repository plugin from the selected marketplace snapshot instead of a nested `main` checkout, and make clean-install smoke tests fail when the installed version differs from the requested branch or tag.
+- Install a pinned, tested Codex CLI in release validation and keep the committed npm lockfile on the official npm registry for reproducible public CI.
 - Decouple subject position from conversation width with image- and intent-aware `subjectDisplayPriority` plus automatic `contentLayout` resolution; ambient/supporting scenery keeps normal Codex width, while only a side-staged showcase subject reserves space.
 - Record the resolved layout decision in package metadata and structured QA, and render previews with the same default-width or reserved-width policy used by runtime CSS.
 - Prevent the Windows CSS monitor from rejecting a legitimate hot refresh when it starts before the new reviewed CSS hash has been transactionally committed; the monitor now pins the expected hash and waits for the matching state handoff without weakening ordinary startup checks.

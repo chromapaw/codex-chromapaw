@@ -38,6 +38,11 @@ jobs:
             requirements-skin.txt
             requirements-dev.txt
 
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
       - name: Install release dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-skin.txt -r requirements-dev.txt
 
@@ -55,8 +60,11 @@ jobs:
       - name: Run release checks
         run: python scripts/release_check.py
 
+      - name: Install tested Codex CLI
+        run: npm install --global @openai/codex@0.144.2 --registry https://registry.npmjs.org
+
       - name: Run isolated plugin installation
-        run: python scripts/smoke_test_install.py --source . --ref= --json
+        run: python scripts/smoke_test_install.py --source chromapaw/codex-chromapaw --ref "${GITHUB_REF_NAME}" --json
 
   publish:
     name: Publish source assets

@@ -58,17 +58,86 @@ def run(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[
     return completed
 
 
-def find_installed_plugin(codex_home: Path) -> Path:
-    for manifest in codex_home.rglob("plugin.json"):
-        if manifest.parent.name != ".codex-plugin":
+def load_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SmokeTestError(f"{label} is not valid UTF-8 JSON: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise SmokeTestError(f"{label} must contain a JSON object: {path}")
+    return value
+
+
+def marketplace_plugin_root(marketplace_root: Path) -> Path:
+    """Resolve the candidate plugin from the selected marketplace snapshot."""
+    root_manifest = marketplace_root / ".codex-plugin" / "plugin.json"
+    if root_manifest.is_file():
+        return marketplace_root
+
+    marketplace_file = marketplace_root / ".agents" / "plugins" / "marketplace.json"
+    marketplace = load_json_object(marketplace_file, "marketplace manifest")
+    for plugin in marketplace.get("plugins", []):
+        if not isinstance(plugin, dict) or plugin.get("name") != PLUGIN_NAME:
             continue
+        source = plugin.get("source")
+        if not isinstance(source, dict) or source.get("source") != "local":
+            break
+        relative = source.get("path")
+        if not isinstance(relative, str) or not relative:
+            break
+        candidate = (marketplace_root / relative).resolve()
         try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            continue
-        if data.get("name") == PLUGIN_NAME:
-            return manifest.parent.parent
-    raise SmokeTestError("installed ChromaPaw plugin manifest was not found")
+            candidate.relative_to(marketplace_root.resolve())
+        except ValueError as exc:
+            raise SmokeTestError("marketplace plugin source escapes its snapshot root") from exc
+        if (candidate / ".codex-plugin" / "plugin.json").is_file():
+            return candidate
+        break
+    raise SmokeTestError("selected marketplace snapshot does not expose the ChromaPaw plugin")
+
+
+def plugin_version(plugin_root: Path, label: str) -> str:
+    manifest = load_json_object(plugin_root / ".codex-plugin" / "plugin.json", label)
+    if manifest.get("name") != PLUGIN_NAME:
+        raise SmokeTestError(f"{label} does not describe {PLUGIN_NAME}")
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version:
+        raise SmokeTestError(f"{label} has no plugin version")
+    return version
+
+
+def installed_plugin_from_result(
+    installation: subprocess.CompletedProcess[str],
+    codex_home: Path,
+    expected_version: str,
+) -> tuple[Path, str]:
+    try:
+        result = json.loads(installation.stdout)
+    except json.JSONDecodeError as exc:
+        raise SmokeTestError("plugin installation did not return valid JSON") from exc
+    if not isinstance(result, dict):
+        raise SmokeTestError("plugin installation result must be a JSON object")
+    installed_path = result.get("installedPath")
+    reported_version = result.get("version")
+    if not isinstance(installed_path, str) or not isinstance(reported_version, str):
+        raise SmokeTestError("plugin installation result omitted installedPath or version")
+    plugin_root = Path(installed_path).resolve()
+    try:
+        plugin_root.relative_to(codex_home.resolve())
+    except ValueError as exc:
+        raise SmokeTestError("installed plugin path escapes the isolated CODEX_HOME") from exc
+    installed_version = plugin_version(plugin_root, "installed plugin manifest")
+    if reported_version != installed_version:
+        raise SmokeTestError(
+            "plugin installation result version does not match the installed manifest: "
+            f"{reported_version} != {installed_version}"
+        )
+    if installed_version != expected_version:
+        raise SmokeTestError(
+            "installed plugin version does not match the selected marketplace snapshot: "
+            f"{installed_version} != {expected_version}"
+        )
+    return plugin_root, installed_version
 
 
 def write_mock_hatch_pet(codex_home: Path) -> Path:
@@ -99,15 +168,15 @@ def write_mock_hatch_pet(codex_home: Path) -> Path:
 
 
 def stage_local_marketplace(plugin_root: Path, staging_root: Path) -> Path:
-    """Create a temporary marketplace whose plugin source is the current worktree."""
+    """Copy the root-plugin marketplace into a clean temporary snapshot."""
     plugin_root = plugin_root.expanduser().resolve()
     if not (plugin_root / ".codex-plugin" / "plugin.json").is_file():
         raise SmokeTestError(f"local plugin source has no manifest: {plugin_root}")
     marketplace_root = staging_root.expanduser().resolve()
-    staged_plugin = marketplace_root / "plugins" / PLUGIN_NAME
     shutil.copytree(
         plugin_root,
-        staged_plugin,
+        marketplace_root,
+        dirs_exist_ok=True,
         ignore=shutil.ignore_patterns(
             ".git",
             ".venv",
@@ -121,33 +190,8 @@ def stage_local_marketplace(plugin_root: Path, staging_root: Path) -> Path:
         ),
     )
     marketplace_file = marketplace_root / ".agents" / "plugins" / "marketplace.json"
-    marketplace_file.parent.mkdir(parents=True)
-    marketplace_file.write_text(
-        json.dumps(
-            {
-                "name": MARKETPLACE_NAME,
-                "interface": {"displayName": "ChromaPaw local smoke test"},
-                "plugins": [
-                    {
-                        "name": PLUGIN_NAME,
-                        "source": {
-                            "source": "local",
-                            "path": f"./plugins/{PLUGIN_NAME}",
-                        },
-                        "policy": {
-                            "installation": "AVAILABLE",
-                            "authentication": "ON_INSTALL",
-                        },
-                        "category": "Creativity",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    if not marketplace_file.is_file():
+        raise SmokeTestError(f"local plugin source has no marketplace manifest: {plugin_root}")
     return marketplace_root
 
 
@@ -164,6 +208,16 @@ def smoke_test(
     if ref:
         marketplace_command.extend(("--ref", ref))
     marketplace = run(marketplace_command, env)
+    try:
+        marketplace_result = json.loads(marketplace.stdout)
+    except json.JSONDecodeError as exc:
+        raise SmokeTestError("marketplace installation did not return valid JSON") from exc
+    if not isinstance(marketplace_result, dict) or not isinstance(
+        marketplace_result.get("installedRoot"), str
+    ):
+        raise SmokeTestError("marketplace installation result omitted installedRoot")
+    selected_root = marketplace_plugin_root(Path(marketplace_result["installedRoot"]).resolve())
+    expected_version = plugin_version(selected_root, "selected marketplace plugin manifest")
     installation = run(
         [codex, "plugin", "add", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--json"],
         env,
@@ -172,7 +226,9 @@ def smoke_test(
     if PLUGIN_NAME not in listing.stdout or "installed, enabled" not in listing.stdout:
         raise SmokeTestError("plugin list did not report ChromaPaw as installed and enabled")
 
-    plugin_root = find_installed_plugin(codex_home)
+    plugin_root, installed_version = installed_plugin_from_result(
+        installation, codex_home, expected_version
+    )
     dependency_script = plugin_root / "scripts" / "check_dependencies.py"
     if not dependency_script.is_file():
         raise SmokeTestError("installed plugin is missing scripts/check_dependencies.py")
@@ -204,6 +260,7 @@ def smoke_test(
         "codexHome": str(codex_home),
         "marketplace": MARKETPLACE_NAME,
         "plugin": PLUGIN_NAME,
+        "version": installed_version,
         "pluginRoot": str(plugin_root),
         "mockHatchPet": str(mock_hatch_pet),
         "marketplaceResult": marketplace.stdout.strip(),

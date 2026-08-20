@@ -27,12 +27,7 @@ class PluginStructureTests(unittest.TestCase):
         self.assertEqual(len(marketplace["plugins"]), 1)
         plugin = marketplace["plugins"][0]
         self.assertEqual(plugin["name"], "codex-chromapaw")
-        self.assertEqual(plugin["source"]["source"], "url")
-        self.assertEqual(
-            plugin["source"]["url"],
-            "https://github.com/chromapaw/codex-chromapaw.git",
-        )
-        self.assertEqual(plugin["source"]["ref"], "main")
+        self.assertEqual(plugin["source"], {"source": "local", "path": "."})
         self.assertEqual(plugin["policy"]["installation"], "AVAILABLE")
         self.assertEqual(plugin["policy"]["authentication"], "ON_INSTALL")
         self.assertEqual(plugin["category"], "Creativity")
