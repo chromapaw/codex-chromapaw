@@ -64,7 +64,9 @@ jobs:
         run: npm install --global @openai/codex@0.144.2 --registry https://registry.npmjs.org
 
       - name: Run isolated plugin installation
-        run: python scripts/smoke_test_install.py --source chromapaw/codex-chromapaw --ref "${GITHUB_REF_NAME}" --json
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: python scripts/smoke_test_install.py --source chromapaw/codex-chromapaw --ref "${RELEASE_TAG}" --json
 
   publish:
     name: Publish source assets

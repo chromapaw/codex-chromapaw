@@ -143,6 +143,7 @@ def validate_repository_policies() -> None:
     for marker in (
         "scripts/release_check.py",
         "scripts/smoke_test_install.py",
+        '--ref "${RELEASE_TAG}"',
         "actions/setup-node@",
         "@openai/codex@0.144.2",
         "sbom-action@",
