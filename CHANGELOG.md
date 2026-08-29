@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recover an ended Windows skin session when its recorded monitor or Codex PID has been recycled, without terminating or attaching to the unrelated replacement process; archive only the stale ChromaPaw state before starting the reviewed skin again.
+- Protect unframed landing and empty-state copy with compact image-derived reading carriers instead of increasing the full main-viewport wash, preserving scene depth while keeping uploaded dark or bright artwork readable.
+- Measure main-window text contrast against actual rendered screenshot pixels in the macOS compatibility harness, and decode renderer subprocess output as UTF-8 on legacy-code-page Windows test hosts.
+- Retry content-addressed Windows shortcut runtime publication across bounded transient antivirus or indexer directory locks while preserving immutable-generation verification and fail-closed errors.
+
 ## 0.4.7 — 2026-08-25
 
 - Resolve the repository plugin from the selected marketplace snapshot instead of a nested `main` checkout, and make clean-install smoke tests fail when the installed version differs from the requested branch or tag.

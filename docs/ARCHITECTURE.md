@@ -63,7 +63,7 @@ See [WINDOWS_RUNTIME_BETA.md](WINDOWS_RUNTIME_BETA.md).
 
 `macos_compat.py` reads `Info.plist`, hashes the bundle's declared executable, records Electron packaging signals, and validates a selected skin package. Its registry is locked to `activationImplemented: false`, every adapter must have `activationEnabled: false`, and there is no activation command.
 
-`macos_enhanced_test.py` adds a CI-only evidence layer on Apple Silicon and Intel GitHub-hosted macOS runners. It uses the production skin builder, validators, pet installer, backup/restore path, and compatibility probe. `macos_visual_smoke.mjs` loads the generated CSS into a Codex-shaped Chromium fixture whose stable attributes mirror the main right-panel and avatar-overlay contracts; it measures computed contrast, checks transparent overlay isolation, preserves `.codex-avatar-root`, and emits screenshots. The fixture is intentionally not coupled to a signed Codex bundle and cannot enable activation.
+`macos_enhanced_test.py` adds a CI-only evidence layer on Apple Silicon and Intel GitHub-hosted macOS runners. It uses the production skin builder, validators, pet installer, backup/restore path, and compatibility probe. `macos_visual_smoke.mjs` loads the generated CSS into a Codex-shaped Chromium fixture whose stable attributes mirror the main right-panel and avatar-overlay contracts; it measures component contrast, samples unframed text against the actual rendered screenshot pixels, checks transparent overlay isolation, preserves `.codex-avatar-root`, and emits screenshots. The fixture is intentionally not coupled to a signed Codex bundle and cannot enable activation.
 
 See [MACOS_COMPATIBILITY.md](MACOS_COMPATIBILITY.md).
 

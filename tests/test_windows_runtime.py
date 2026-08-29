@@ -872,6 +872,7 @@ class WindowsRuntimeTests(unittest.TestCase):
                 data_dir,
                 operation="restore",
                 expected_session_id=mock.ANY,
+                recover_stale_identities=True,
             )
             activate.assert_called_once()
             self.assertTrue(result["resumed"])
@@ -923,7 +924,78 @@ class WindowsRuntimeTests(unittest.TestCase):
                 data_dir,
                 operation="restore",
                 expected_session_id="observed-session",
+                recover_stale_identities=True,
             )
+
+    def test_stale_restore_skips_reused_monitor_after_codex_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            state = {
+                "schemaVersion": 1,
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "pid": 101,
+                "processCreationTime": 111,
+                "executable": "C:/fixture/ChatGPT.exe",
+                "executableHash": "a" * 64,
+                "monitorPid": 202,
+                "monitorCreationTime": 222,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": "b" * 64,
+                "port": 12345,
+                "allowedTargetSchemes": ["app"],
+                "cssHash": "c" * 64,
+                "backupDir": str(backup_dir),
+                "packageId": "fixture-skin",
+                "appVersion": "26.707.9981.0",
+            }
+            (data_dir / "active.json").write_text(json.dumps(state), encoding="utf-8")
+            reused = {
+                "running": True,
+                "pathMatches": True,
+                "creationTimeMatches": False,
+                "executableHashMatches": True,
+                "matches": False,
+            }
+            exited = {
+                "running": False,
+                "pathMatches": False,
+                "creationTimeMatches": False,
+                "executableHashMatches": True,
+                "matches": False,
+            }
+            with mock.patch(
+                "windows_runtime._process_identity_status", side_effect=[reused, exited]
+            ), mock.patch(
+                "windows_runtime._terminate_monitor_process"
+            ) as terminate_monitor, mock.patch(
+                "windows_runtime._terminate_runtime_process"
+            ) as terminate_codex, mock.patch(
+                "windows_runtime.CdpEndpoint"
+            ) as endpoint, mock.patch(
+                "windows_runtime.remove_css"
+            ) as remove, mock.patch(
+                "windows_runtime._config_backup_status", return_value={"unchanged": True}
+            ):
+                result = restore_runtime(
+                    data_dir,
+                    expected_session_id="fixture-session",
+                    recover_stale_identities=True,
+                )
+
+            terminate_monitor.assert_not_called()
+            terminate_codex.assert_not_called()
+            endpoint.assert_not_called()
+            remove.assert_not_called()
+            self.assertFalse((data_dir / "active.json").exists())
+            self.assertFalse(result["process"]["skipped"])
+            self.assertEqual(result["process"]["reason"], "already-exited")
+            self.assertTrue(result["monitor"]["skipped"])
+            self.assertIsNone(result["transportClosed"])
+            final = json.loads((backup_dir / "final.json").read_text(encoding="utf-8"))
+            self.assertTrue(final["staleIdentityRecovery"])
 
     def test_resume_rejects_session_change_between_status_and_state_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

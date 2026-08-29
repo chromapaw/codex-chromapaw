@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -552,10 +553,10 @@ def _install_hosted_runtime(data_dir: Path, adapters: Path) -> dict[str, Any]:
                 if sha256_file(target) != entry["sha256"]:
                     raise RuntimeFailure(f"hosted runtime copy verification failed: {target}")
             atomic_json(staging / "manifest.json", manifest)
-            os.replace(staging, generation)
+            _publish_hosted_generation(staging, generation, manifest)
         finally:
             if staging.exists():
-                shutil.rmtree(staging)
+                shutil.rmtree(staging, ignore_errors=True)
     _verify_generation(generation, manifest)
 
     bootstrap = hosted_root / "bootstrap.py"
@@ -579,6 +580,39 @@ def _install_hosted_runtime(data_dir: Path, adapters: Path) -> dict[str, Any]:
         "files": manifest["files"],
         "retainedAfterShortcutRemoval": True,
     }
+
+
+def _publish_hosted_generation(
+    staging: Path,
+    generation: Path,
+    manifest: dict[str, Any],
+    *,
+    attempts: int = 5,
+) -> None:
+    """Publish an immutable runtime directory despite short Windows file locks."""
+    for attempt in range(attempts):
+        if generation.exists():
+            if not generation.is_dir():
+                raise RuntimeFailure(
+                    f"hosted runtime generation path is not a directory: {generation}"
+                )
+            _verify_generation(generation, manifest)
+            return
+        try:
+            os.replace(staging, generation)
+            return
+        except OSError as exc:
+            transient = isinstance(exc, PermissionError) or getattr(exc, "winerror", None) in {
+                5,
+                32,
+                33,
+            }
+            if not transient or attempt + 1 >= attempts:
+                raise RuntimeFailure(
+                    f"hosted runtime generation could not be published: {generation}: {exc}"
+                ) from exc
+            time.sleep(0.05 * (2**attempt))
+    raise RuntimeFailure(f"hosted runtime generation could not be published: {generation}")
 
 
 def _hosted_runtime_status(receipt: dict[str, Any]) -> dict[str, Any]:

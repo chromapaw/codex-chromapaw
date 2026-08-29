@@ -321,6 +321,8 @@ def run(output: Path, *, force: bool, allow_non_darwin: bool) -> dict[str, Any]:
             command,
             cwd=ROOT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
             timeout=120,

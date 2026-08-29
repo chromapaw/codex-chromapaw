@@ -2057,6 +2057,7 @@ def restore_runtime(
     *,
     operation: str = "restore",
     expected_session_id: str | None = None,
+    recover_stale_identities: bool = False,
 ) -> dict[str, Any]:
     with runtime_lock(data_dir):
         state = _read_active(data_dir)
@@ -2066,38 +2067,92 @@ def restore_runtime(
             raise RuntimeFailure(
                 "active runtime session changed before restore; refusing to restore a different session"
             )
-        monitor = _terminate_monitor_process(state)
-        endpoint = CdpEndpoint(int(state["port"]), timeout=5.0)
-        schemes = set(state["allowedTargetSchemes"])
-        try:
-            removed = remove_css(
-                endpoint,
-                str(state["cssHash"]),
-                str(state["sessionToken"]),
-                schemes,
-            )
-        except CdpError as exc:
-            removed = []
-            transport_error = str(exc)
+        monitor_identity = _process_identity_status(
+            state.get("monitorPid"),
+            state.get("monitorExecutable"),
+            state.get("monitorCreationTime"),
+            state.get("monitorExecutableHash"),
+        )
+        if recover_stale_identities and not monitor_identity["matches"]:
+            monitor = {
+                "terminated": not monitor_identity["running"],
+                "skipped": bool(monitor_identity["running"]),
+                "reason": (
+                    "recorded-monitor-pid-was-reused"
+                    if monitor_identity["running"]
+                    else "already-exited"
+                ),
+                "pid": state.get("monitorPid"),
+                "label": "monitor",
+                "identity": monitor_identity,
+            }
         else:
-            transport_error = None
-            if not _results_pass(removed, "removed"):
-                raise RuntimeFailure(
-                    "refusing to stop because a target style marker no longer belongs to this session"
-                )
+            monitor = _terminate_monitor_process(state)
 
-        terminated = _terminate_runtime_process(state)
-        deadline = time.monotonic() + 8.0
-        transport_closed = False
-        while time.monotonic() < deadline:
+        process_identity = _process_identity_status(
+            state.get("pid"),
+            state.get("executable"),
+            state.get("processCreationTime"),
+            state.get("executableHash"),
+        )
+        process_owned = bool(process_identity["matches"])
+        endpoint: CdpEndpoint | None = None
+        removed: list[dict[str, Any]] = []
+        if recover_stale_identities and not process_owned:
+            transport_error = (
+                "CSS removal skipped because the recorded Codex process no longer belongs "
+                "to this ChromaPaw session"
+            )
+        else:
+            endpoint = CdpEndpoint(int(state["port"]), timeout=5.0)
+            schemes = set(state["allowedTargetSchemes"])
             try:
-                endpoint.version()
-            except CdpError:
-                transport_closed = True
-                break
-            time.sleep(0.2)
-        if not transport_closed:
-            raise RuntimeFailure("runtime process stopped but the loopback debugging transport stayed open")
+                removed = remove_css(
+                    endpoint,
+                    str(state["cssHash"]),
+                    str(state["sessionToken"]),
+                    schemes,
+                )
+            except CdpError as exc:
+                transport_error = str(exc)
+            else:
+                transport_error = None
+                if not _results_pass(removed, "removed"):
+                    raise RuntimeFailure(
+                        "refusing to stop because a target style marker no longer belongs to this session"
+                    )
+
+        if recover_stale_identities and not process_owned:
+            terminated = {
+                "terminated": not process_identity["running"],
+                "skipped": bool(process_identity["running"]),
+                "reason": (
+                    "recorded-codex-pid-was-reused"
+                    if process_identity["running"]
+                    else "already-exited"
+                ),
+                "pid": state.get("pid"),
+                "label": "Codex",
+                "identity": process_identity,
+            }
+        else:
+            terminated = _terminate_runtime_process(state)
+
+        transport_closed: bool | None = None
+        if process_owned and endpoint is not None:
+            deadline = time.monotonic() + 8.0
+            transport_closed = False
+            while time.monotonic() < deadline:
+                try:
+                    endpoint.version()
+                except CdpError:
+                    transport_closed = True
+                    break
+                time.sleep(0.2)
+            if not transport_closed:
+                raise RuntimeFailure(
+                    "runtime process stopped but the loopback debugging transport stayed open"
+                )
 
         config_status = _config_backup_status(state)
         final = {
@@ -2110,6 +2165,7 @@ def restore_runtime(
             "transportClosed": transport_closed,
             "process": terminated,
             "monitor": monitor,
+            "staleIdentityRecovery": recover_stale_identities,
             "config": config_status,
         }
         backup_dir = Path(str(state["backupDir"]))
@@ -2122,6 +2178,9 @@ def restore_runtime(
                 "event": final["status"],
                 "sessionId": state["sessionId"],
                 "transportClosed": transport_closed,
+                "staleIdentityRecovery": recover_stale_identities,
+                "processIdentitySkipped": bool(terminated.get("skipped")),
+                "monitorIdentitySkipped": bool(monitor.get("skipped")),
             },
         )
         return final
@@ -2296,6 +2355,7 @@ def resume_runtime(
             data_dir,
             operation="restore",
             expected_session_id=active_session_id,
+            recover_stale_identities=True,
         )
 
     executable = Path(preference["executable"]).expanduser().resolve()

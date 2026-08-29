@@ -336,6 +336,7 @@ def _variable_block(
   --chromapaw-content-veil: {content_veil};
   --chromapaw-reading-surface: rgb(var(--chromapaw-surface-rgb) / 0.78);
   --chromapaw-reading-surface-strong: rgb(var(--chromapaw-surface-rgb) / 0.88);
+  --chromapaw-unframed-reading-surface: rgb(var(--chromapaw-surface-rgb) / 0.97);
   --chromapaw-reading-border: rgb(var(--chromapaw-ink-rgb) / 0.14);
   --chromapaw-reading-shadow: rgb(0 0 0 / 0.14);
   --chromapaw-reading-max-inline: {reading_max_inline};
@@ -671,6 +672,54 @@ body:has([data-avatar-overlay-content-frame="true"])
 main.main-surface {
   background-color: transparent !important;
   background-image: var(--chromapaw-content-veil) !important;
+}
+
+/*
+ * Landing and empty-state copy can sit outside conversation turns. Protect
+ * only semantic heading-plus-description pairs with compact local carriers;
+ * this keeps the rest of the artwork crisp and avoids flattening the entire
+ * main viewport with a high-opacity wash.
+ */
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(*):has(+ :where(h1, h2, [role="heading"])):not([data-turn-key] *) {
+  display: table;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  padding: 0.34em 0.62em;
+  border: 1px solid rgb(var(--chromapaw-accent-readable-rgb) / 0.52);
+  border-radius: 999px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink) !important;
+  box-shadow: 0 8px 22px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(h1, h2, [role="heading"]):has(+ p):not([data-turn-key] *) {
+  display: table;
+  padding: 0.28em 0.52em;
+  border: 1px solid var(--chromapaw-reading-border);
+  border-radius: 16px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink) !important;
+  box-shadow: 0 10px 28px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(h1, h2, [role="heading"]):has(+ p):not([data-turn-key] *)
+  + p:not([data-turn-key] *) {
+  display: table;
+  padding: 0.48em 0.72em;
+  border: 1px solid var(--chromapaw-reading-border);
+  border-radius: 14px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink-secondary) !important;
+  box-shadow: 0 10px 28px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
 }
 
 /*

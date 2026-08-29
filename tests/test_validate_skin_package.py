@@ -207,6 +207,9 @@ class SkinPackageValidationTests(unittest.TestCase):
                 css,
             )
             self.assertIn("--chromapaw-content-veil:", css)
+            self.assertIn("--chromapaw-unframed-reading-surface:", css)
+            self.assertIn(":has(+ :where(h1, h2, [role=\"heading\"]))", css)
+            self.assertIn(":has(+ p):not([data-turn-key] *)", css)
             self.assertIn(
                 "[data-thread-find-target] [data-turn-key]::before",
                 css,

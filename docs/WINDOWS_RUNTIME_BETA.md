@@ -60,7 +60,7 @@ After the monitor starts successfully, activation also writes `preferred-skin.js
 
 ### Resume after closing Codex
 
-Closing Codex ends the in-memory style and its loopback transport. Resume revalidates the saved preference, recovers the stale ended session record, and starts a fresh runtime:
+Closing Codex ends the in-memory style and its loopback transport. Resume revalidates the saved preference, recovers the stale ended session record, and starts a fresh runtime. If Windows has already recycled a recorded PID, recovery treats the replacement as unrelated: it never terminates or attaches to that process, archives only the old ChromaPaw state, and continues with a fresh reviewed session:
 
 ```powershell
 python scripts/windows_runtime.py --json resume --acknowledge-experimental-runtime

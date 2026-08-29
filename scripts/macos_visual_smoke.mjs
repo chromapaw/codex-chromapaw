@@ -153,6 +153,100 @@ const colorProbe = `() => {
   };
 }`;
 
+async function renderedContrastProbe(page, probes) {
+  const prepared = await page.evaluate((items) => items.map((item) => {
+    const element = document.querySelector(item.selector);
+    if (!element) throw new Error(`rendered contrast probe is missing ${item.selector}`);
+    const style = getComputedStyle(element);
+    const textColor = style.color;
+    const rect = element.getBoundingClientRect();
+    const previousColor = element.style.getPropertyValue("color");
+    const previousPriority = element.style.getPropertyPriority("color");
+    element.style.setProperty("color", "transparent", "important");
+    return {
+      ...item,
+      color: textColor,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      previousColor,
+      previousPriority,
+    };
+  }), probes);
+
+  const backgroundPng = await page.screenshot({ fullPage: false });
+  await page.evaluate((items) => {
+    for (const item of items) {
+      const element = document.querySelector(item.selector);
+      if (!element) continue;
+      if (item.previousColor) {
+        element.style.setProperty("color", item.previousColor, item.previousPriority);
+      } else {
+        element.style.removeProperty("color");
+      }
+    }
+  }, prepared);
+
+  const result = await page.evaluate(async ({ png, items }) => {
+    const parse = (value) => {
+      const match = String(value).match(/rgba?\(([^)]+)\)/i);
+      if (!match) throw new Error(`unsupported rendered text color: ${value}`);
+      const parts = match[1].replaceAll(",", " ").split(/\s+/).filter(Boolean).map(Number);
+      return { r: parts[0], g: parts[1], b: parts[2] };
+    };
+    const linear = (channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (color) => (
+      0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    );
+    const ratio = (first, second) => {
+      const values = [luminance(first), luminance(second)].sort((a, b) => b - a);
+      return (values[0] + 0.05) / (values[1] + 0.05);
+    };
+    const image = new Image();
+    image.src = `data:image/png;base64,${png}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+
+    return Object.fromEntries(items.map((item) => {
+      const text = parse(item.color);
+      const x = Math.max(0, Math.ceil(item.rect.x + 4));
+      const y = Math.max(0, Math.ceil(item.rect.y + 4));
+      const width = Math.max(1, Math.floor(item.rect.width - 8));
+      const height = Math.max(1, Math.floor(item.rect.height - 8));
+      const pixels = context.getImageData(x, y, width, height).data;
+      const samples = [];
+      const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 2000)));
+      for (let row = 0; row < height; row += stride) {
+        for (let column = 0; column < width; column += stride) {
+          const offset = (row * width + column) * 4;
+          samples.push(ratio(text, {
+            r: pixels[offset],
+            g: pixels[offset + 1],
+            b: pixels[offset + 2],
+          }));
+        }
+      }
+      samples.sort((a, b) => a - b);
+      const percentile = (fraction) => samples[Math.min(samples.length - 1, Math.floor(samples.length * fraction))];
+      return [item.name, {
+        selector: item.selector,
+        textColor: item.color,
+        rect: item.rect,
+        sampleCount: samples.length,
+        minimum: samples[0],
+        percentile05: percentile(0.05),
+        median: percentile(0.5),
+      }];
+    }));
+  }, { png: backgroundPng.toString("base64"), items: prepared });
+  return result;
+}
+
 const overlayProbe = `() => {
   const parse = (value) => {
     const match = String(value).match(/rgba?\\(([^)]+)\\)/i);
@@ -254,6 +348,18 @@ async function run() {
       requireGate(main.panelContrast >= 4.5, `${mode}: right panel contrast ${main.panelContrast.toFixed(2)} is below 4.5`);
       requireGate(main.primary.contrast >= 4.5, `${mode}: section primary contrast is below 4.5`);
       requireGate(main.secondary.contrast >= 4.5, `${mode}: section secondary contrast is below 4.5`);
+      const renderedContrast = await renderedContrastProbe(mainPage, [
+        { name: "introLabel", selector: "main.main-surface .eyebrow" },
+        { name: "heading", selector: "main.main-surface h1" },
+        { name: "lead", selector: "main.main-surface h1 + p" },
+      ]);
+      for (const [name, evidence] of Object.entries(renderedContrast)) {
+        requireGate(
+          evidence.percentile05 >= 4.5,
+          `${mode}: rendered ${name} contrast ${evidence.percentile05.toFixed(2)} is below 4.5`,
+        );
+      }
+      main.scene.renderedContrast = renderedContrast;
       const mainScreenshot = path.join(output, `macos-main-${mode}.png`);
       await mainPage.screenshot({ path: mainScreenshot, fullPage: false });
       await mainPage.close();
