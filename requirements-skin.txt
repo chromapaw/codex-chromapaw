@@ -1,2 +1,2 @@
 # Optional dependency for local Skin Studio building and preview rendering.
-Pillow>=10.0,<13.0
+Pillow>=12.3.0,<13.0
