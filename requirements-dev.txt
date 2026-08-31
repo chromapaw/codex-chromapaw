@@ -1,4 +1,4 @@
 # Dependencies used by repository checks, compatibility helpers, and validators.
-PyYAML==6.0.2
-tomli==2.2.1; python_version < "3.11"
+PyYAML==6.0.3
+tomli==2.4.1; python_version < "3.11"
 jsonschema==4.26.0
