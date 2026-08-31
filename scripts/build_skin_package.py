@@ -29,7 +29,7 @@ except ImportError:
     from theme_profile import normalize_theme_profile, sha256_file  # type: ignore
 
 
-GENERATOR_VERSION = "0.4.8"
+GENERATOR_VERSION = "0.5.0"
 SAFE_CONTENT_ZONE = {"x": 0.25, "y": 0.08, "width": 0.67, "height": 0.84}
 DEPTH_LAYERS = ["atmosphere", "distant", "midground", "foreground"]
 GLOBAL_WASH_OPACITY = 0.08
@@ -119,6 +119,8 @@ def semantic_ui_palette(palette: dict[str, Any], mode: str) -> dict[str, str]:
     side_panel_text = _ensure_contrast(ink, surface, 4.5)
     side_panel_secondary = _accessible_blend(side_panel_text, surface, 0.24, 4.5)
     side_panel_section_text = _ensure_contrast(side_panel_text, elevated, 4.5)
+    title_bar_text = _ensure_contrast(ink, elevated, 4.5)
+    title_bar_secondary = _accessible_blend(title_bar_text, elevated, 0.24, 4.5)
     return {
         "primaryText": _hex(ink),
         "secondaryText": _hex(secondary),
@@ -138,6 +140,9 @@ def semantic_ui_palette(palette: dict[str, Any], mode: str) -> dict[str, str]:
         "sidePanelSecondaryText": _hex(side_panel_secondary),
         "sidePanelSectionSurface": _hex(elevated),
         "sidePanelSectionText": _hex(side_panel_section_text),
+        "titleBarSurface": _hex(elevated),
+        "titleBarText": _hex(title_bar_text),
+        "titleBarSecondaryText": _hex(title_bar_secondary),
     }
 
 
@@ -196,45 +201,96 @@ def _rgb(value: str) -> str:
     return " ".join(str(int(value[index : index + 2], 16)) for index in (1, 3, 5))
 
 
+def resolve_content_layout(visual_treatment: dict[str, Any] | None) -> dict[str, Any]:
+    """Resolve whether Codex content must permanently yield to a staged subject."""
+    treatment = visual_treatment or {}
+    subject_placement = str(treatment.get("subjectPlacement", "source"))
+    subject_display_priority = str(
+        treatment.get("subjectDisplayPriority", "supporting")
+    )
+    requested_layout = str(treatment.get("contentLayout", "auto"))
+    if subject_placement not in {"source", "left", "right", "edge-balanced"}:
+        raise ValueError(
+            "visualTreatment.subjectPlacement must be source, left, right, or edge-balanced"
+        )
+    if subject_display_priority not in {"ambient", "supporting", "showcase"}:
+        raise ValueError(
+            "visualTreatment.subjectDisplayPriority must be ambient, supporting, or showcase"
+        )
+    if requested_layout not in {"auto", "default", "reserve-subject"}:
+        raise ValueError(
+            "visualTreatment.contentLayout must be auto, default, or reserve-subject"
+        )
+
+    subject_is_staged = subject_placement in {"left", "right"}
+    if requested_layout == "reserve-subject":
+        if not subject_is_staged:
+            raise ValueError(
+                "reserve-subject content layout requires left or right subject placement"
+            )
+        reserve_subject_space = True
+        reason = "explicit-reservation"
+    elif requested_layout == "default":
+        reserve_subject_space = False
+        reason = "explicit-default-width"
+    else:
+        reserve_subject_space = (
+            subject_is_staged and subject_display_priority == "showcase"
+        )
+        reason = (
+            "auto-showcase-side-subject"
+            if reserve_subject_space
+            else "auto-default-width"
+        )
+
+    return {
+        "requested": requested_layout,
+        "resolved": "reserve-subject" if reserve_subject_space else "default",
+        "reserveSubjectSpace": reserve_subject_space,
+        "reason": reason,
+        "subjectPlacement": subject_placement,
+        "subjectDisplayPriority": subject_display_priority,
+    }
+
+
 def _variable_block(
-    palette: dict[str, Any], selector: str, mode: str, subject_placement: str
+    palette: dict[str, Any],
+    selector: str,
+    mode: str,
+    subject_placement: str,
+    reserve_subject_space: bool,
 ) -> str:
     surface = palette["surface"]
     ink = palette["ink"]
     accent = palette["accent"]
     ui = semantic_ui_palette(palette, mode)
     opacity = palette["panelOpacity"]
+    reading_max_inline = "66%" if reserve_subject_space else "100%"
+    reading_margin_start = (
+        "auto" if reserve_subject_space and subject_placement == "left" else "0"
+    )
+    reading_margin_end = (
+        "auto" if reserve_subject_space and subject_placement == "right" else "0"
+    )
     if subject_placement == "right":
-        reading_max_inline = "66%"
-        reading_margin_start = "0"
-        reading_margin_end = "auto"
         content_veil = (
             "linear-gradient(90deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
         )
     elif subject_placement == "left":
-        reading_max_inline = "66%"
-        reading_margin_start = "auto"
-        reading_margin_end = "0"
         content_veil = (
             "linear-gradient(270deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.46) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.28) 48%, transparent 68%)"
         )
     elif subject_placement == "edge-balanced":
-        reading_max_inline = "100%"
-        reading_margin_start = "0"
-        reading_margin_end = "0"
         content_veil = (
             "radial-gradient(ellipse at center, "
             "rgb(var(--chromapaw-surface-rgb) / 0.34) 0%, "
             "rgb(var(--chromapaw-surface-rgb) / 0.18) 56%, transparent 92%)"
         )
     else:
-        reading_max_inline = "100%"
-        reading_margin_start = "0"
-        reading_margin_end = "0"
         content_veil = (
             "linear-gradient(90deg, "
             "rgb(var(--chromapaw-surface-rgb) / 0.24), "
@@ -267,6 +323,10 @@ def _variable_block(
   --chromapaw-side-panel-text-secondary: {ui['sidePanelSecondaryText']};
   --chromapaw-side-panel-section-surface: {ui['sidePanelSectionSurface']};
   --chromapaw-side-panel-section-text: {ui['sidePanelSectionText']};
+  --chromapaw-titlebar-surface: {ui['titleBarSurface']};
+  --chromapaw-titlebar-surface-rgb: {_rgb(ui['titleBarSurface'])};
+  --chromapaw-titlebar-text: {ui['titleBarText']};
+  --chromapaw-titlebar-text-secondary: {ui['titleBarSecondaryText']};
   --chromapaw-color-scheme: {mode};
   --chromapaw-panel-opacity: {opacity};
   --chromapaw-scene-wash: {GLOBAL_WASH_OPACITY};
@@ -276,6 +336,7 @@ def _variable_block(
   --chromapaw-content-veil: {content_veil};
   --chromapaw-reading-surface: rgb(var(--chromapaw-surface-rgb) / 0.78);
   --chromapaw-reading-surface-strong: rgb(var(--chromapaw-surface-rgb) / 0.88);
+  --chromapaw-unframed-reading-surface: rgb(var(--chromapaw-surface-rgb) / 0.97);
   --chromapaw-reading-border: rgb(var(--chromapaw-ink-rgb) / 0.14);
   --chromapaw-reading-shadow: rgb(0 0 0 / 0.14);
   --chromapaw-reading-max-inline: {reading_max_inline};
@@ -287,17 +348,27 @@ def _variable_block(
 def build_css(
     palettes: dict[str, Any], mode: str, visual_treatment: dict[str, Any] | None = None
 ) -> str:
-    subject_placement = str((visual_treatment or {}).get("subjectPlacement", "source"))
+    layout = resolve_content_layout(visual_treatment)
+    subject_placement = str(layout["subjectPlacement"])
+    reserve_subject_space = bool(layout["reserveSubjectSpace"])
     blocks = []
     if mode == "adaptive":
         blocks.append(
             _variable_block(
-                palettes["light"], ":root, html.electron-light", "light", subject_placement
+                palettes["light"],
+                ":root, html.electron-light",
+                "light",
+                subject_placement,
+                reserve_subject_space,
             )
         )
         blocks.append(
             _variable_block(
-                palettes["dark"], "html.electron-dark", "dark", subject_placement
+                palettes["dark"],
+                "html.electron-dark",
+                "dark",
+                subject_placement,
+                reserve_subject_space,
             )
         )
         blocks.append(
@@ -307,12 +378,19 @@ def build_css(
                 ":root:not(.electron-light)",
                 "dark",
                 subject_placement,
+                reserve_subject_space,
             )
             + "\n}"
         )
     else:
         blocks.append(
-            _variable_block(palettes[mode], ":root, html", mode, subject_placement)
+            _variable_block(
+                palettes[mode],
+                ":root, html",
+                mode,
+                subject_placement,
+                reserve_subject_space,
+            )
         )
 
     common = r"""
@@ -472,6 +550,44 @@ body,
   color: var(--chromapaw-ink);
 }
 
+/*
+ * Current Codex desktop builds render the native application menu inside a
+ * transparent Electron drag region instead of consuming the VS Code title-bar
+ * variables above. Give that region its own adaptive glass surface so the
+ * navigation icons, application menus, and native window controls remain
+ * legible over both bright skies and dark artwork.
+ */
+.app-header-tint {
+  color: var(--chromapaw-titlebar-text) !important;
+  background:
+    linear-gradient(
+      90deg,
+      rgb(var(--chromapaw-titlebar-surface-rgb) / 0.96),
+      rgb(var(--chromapaw-surface-rgb) / 0.94) 42%,
+      rgb(var(--chromapaw-titlebar-surface-rgb) / 0.96)
+    ) !important;
+  border-bottom: 1px solid rgb(var(--chromapaw-ink-rgb) / 0.16) !important;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.12) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
+}
+
+.app-header-tint button {
+  color: var(--chromapaw-titlebar-text-secondary) !important;
+}
+
+.app-header-tint button:disabled {
+  color: var(--chromapaw-ink-muted) !important;
+  opacity: 0.62 !important;
+}
+
+.app-header-tint button:hover,
+.app-header-tint button:focus-visible,
+.app-header-tint button[aria-expanded="true"] {
+  color: var(--chromapaw-titlebar-text) !important;
+  background: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+}
+
 body {
   isolation: isolate;
 }
@@ -556,6 +672,54 @@ body:has([data-avatar-overlay-content-frame="true"])
 main.main-surface {
   background-color: transparent !important;
   background-image: var(--chromapaw-content-veil) !important;
+}
+
+/*
+ * Landing and empty-state copy can sit outside conversation turns. Protect
+ * only semantic heading-plus-description pairs with compact local carriers;
+ * this keeps the rest of the artwork crisp and avoids flattening the entire
+ * main viewport with a high-opacity wash.
+ */
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(*):has(+ :where(h1, h2, [role="heading"])):not([data-turn-key] *) {
+  display: table;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  padding: 0.34em 0.62em;
+  border: 1px solid rgb(var(--chromapaw-accent-readable-rgb) / 0.52);
+  border-radius: 999px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink) !important;
+  box-shadow: 0 8px 22px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(h1, h2, [role="heading"]):has(+ p):not([data-turn-key] *) {
+  display: table;
+  padding: 0.28em 0.52em;
+  border: 1px solid var(--chromapaw-reading-border);
+  border-radius: 16px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink) !important;
+  box-shadow: 0 10px 28px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+
+:where(.app-shell-main-content-viewport, main.main-surface)
+  :where(h1, h2, [role="heading"]):has(+ p):not([data-turn-key] *)
+  + p:not([data-turn-key] *) {
+  display: table;
+  padding: 0.48em 0.72em;
+  border: 1px solid var(--chromapaw-reading-border);
+  border-radius: 14px;
+  background: var(--chromapaw-unframed-reading-surface) !important;
+  color: var(--chromapaw-ink-secondary) !important;
+  box-shadow: 0 10px 28px var(--chromapaw-reading-shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
 }
 
 /*
@@ -743,7 +907,7 @@ main.main-surface {
 }
 """
     return (
-        "/* ChromaPaw Skin Studio v0.4.8 scene-fidelity stylesheet. Activation requires a compatible runtime. */\n"
+        f"/* ChromaPaw Skin Studio v{GENERATOR_VERSION} scene-fidelity stylesheet. Activation requires a compatible runtime. */\n"
         + "\n\n".join(blocks)
         + common
     )
@@ -790,7 +954,9 @@ def render_preview(
 ) -> Image.Image:
     """Render a real-artwork desktop mockup for visual QA."""
     width, height = size
-    subject_placement = str((visual_treatment or {}).get("subjectPlacement", "source"))
+    layout = resolve_content_layout(visual_treatment)
+    subject_placement = str(layout["subjectPlacement"])
+    reserve_subject_space = bool(layout["reserveSubjectSpace"])
     canvas = _cover(artwork, size, subject_placement)
     overlay = Image.new("RGBA", size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -799,6 +965,9 @@ def render_preview(
     ink = _rgb_tuple(ui["primaryText"])
     muted_ink = _rgb_tuple(ui["mutedText"])
     accent = _rgb_tuple(ui["accentText"])
+    titlebar_surface = _rgb_tuple(ui["titleBarSurface"])
+    titlebar_ink = _rgb_tuple(ui["titleBarText"])
+    titlebar_secondary = _rgb_tuple(ui["titleBarSecondaryText"])
     panel_alpha = round(float(palette["panelOpacity"]) * 255)
     shadow = (0, 0, 0, 34 if mode == "light" else 72)
 
@@ -813,8 +982,35 @@ def render_preview(
     draw.rectangle((0, 0, sidebar, height), fill=surface + (panel_alpha,))
     draw.line((sidebar, 0, sidebar, height), fill=accent + (48,), width=1)
 
+    titlebar_height = max(28, round(height * 0.06))
+    draw.rectangle(
+        (0, 0, width, titlebar_height),
+        fill=titlebar_surface + (244,),
+    )
+    draw.line(
+        (0, titlebar_height - 1, width, titlebar_height - 1),
+        fill=titlebar_ink + (42,),
+        width=1,
+    )
+    titlebar_y = titlebar_height // 2
+    draw.line((22, titlebar_y - 5, 16, titlebar_y, 22, titlebar_y + 5), fill=titlebar_secondary + (245,), width=2)
+    draw.line((39, titlebar_y - 5, 45, titlebar_y, 39, titlebar_y + 5), fill=titlebar_secondary + (150,), width=2)
+    menu_size = max(9, round(width * 0.011))
+    menu_font = _font(menu_size)
+    draw.text(
+        (62, max(5, titlebar_y - menu_size // 2 - 2)),
+        "File   Edit   View   Help",
+        font=menu_font,
+        fill=titlebar_secondary + (245,),
+    )
+    control_y = titlebar_y
+    draw.line((width - 88, control_y + 3, width - 78, control_y + 3), fill=titlebar_ink + (220,), width=1)
+    draw.rectangle((width - 58, control_y - 5, width - 48, control_y + 5), outline=titlebar_ink + (220,), width=1)
+    draw.line((width - 25, control_y - 5, width - 15, control_y + 5), fill=titlebar_ink + (220,), width=1)
+    draw.line((width - 15, control_y - 5, width - 25, control_y + 5), fill=titlebar_ink + (220,), width=1)
+
     margin = max(18, round(width * 0.025))
-    top = max(18, round(height * 0.045))
+    top = max(titlebar_height + 18, round(height * 0.08))
     brand_font = _font(max(16, round(width * 0.021)), bold=True)
     body_font = _font(max(11, round(width * 0.012)))
     small_font = _font(max(9, round(width * 0.010)))
@@ -845,9 +1041,9 @@ def render_preview(
 
     main_left = sidebar + round(width * 0.055)
     main_right = width - round(width * 0.06)
-    if subject_placement == "right":
+    if reserve_subject_space and subject_placement == "right":
         main_right = main_left + round((main_right - main_left) * 0.62)
-    elif subject_placement == "left":
+    elif reserve_subject_space and subject_placement == "left":
         available = main_right - main_left
         main_left = main_left + round(available * 0.38)
     content_width = main_right - main_left
@@ -996,6 +1192,7 @@ def _prepare_output(output: Path, force: bool) -> None:
 
 def build_package(request_path: Path, output: Path, force: bool = False) -> dict[str, Any]:
     request = _load_request(request_path.resolve())
+    content_layout = resolve_content_layout(request.get("visualTreatment"))
     artwork_path = Path(str(request["artworkImage"])).expanduser().resolve()
     if not artwork_path.is_file():
         raise ValueError(f"artwork image does not exist: {artwork_path}")
@@ -1086,6 +1283,8 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
             ("sidePanelText", "sidePanelSurface"),
             ("sidePanelSecondaryText", "sidePanelSurface"),
             ("sidePanelSectionText", "sidePanelSectionSurface"),
+            ("titleBarText", "titleBarSurface"),
+            ("titleBarSecondaryText", "titleBarSurface"),
         )
         for role, surface_role in contrast_roles:
             ratio = contrast_ratio(ui_palette[surface_role], ui_palette[role])
@@ -1156,6 +1355,14 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
                 },
                 "threshold": {"maximumGlobalWashOpacity": 0.12},
             },
+            {
+                "id": "dynamic-content-layout",
+                "status": "pass",
+                "value": content_layout,
+                "threshold": {
+                    "reserveOnlyFor": "side-staged-showcase-subject-or-explicit-override"
+                },
+            },
         ]
         + ui_contrast_checks,
         "activation": {
@@ -1194,6 +1401,10 @@ def build_package(request_path: Path, output: Path, force: bool = False) -> dict
                 "subjectPlacement": str(
                     request.get("visualTreatment", {}).get("subjectPlacement", "source")
                 ),
+                "subjectDisplayPriority": str(
+                    content_layout["subjectDisplayPriority"]
+                ),
+                "contentLayout": str(content_layout["resolved"]),
                 "artworkRecomposed": bool(
                     request.get("visualTreatment", {}).get("artworkRecomposed", False)
                 ),

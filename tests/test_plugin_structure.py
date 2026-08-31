@@ -12,8 +12,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.6")
-        self.assertRegex(manifest["version"], r"^0\.4\.6(?:\+codex\.[0-9a-z-]+)?$")
+        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.7")
+        self.assertRegex(manifest["version"], r"^0\.4\.7(?:\+codex\.[0-9a-z-]+)?$")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -27,12 +27,7 @@ class PluginStructureTests(unittest.TestCase):
         self.assertEqual(len(marketplace["plugins"]), 1)
         plugin = marketplace["plugins"][0]
         self.assertEqual(plugin["name"], "codex-chromapaw")
-        self.assertEqual(plugin["source"]["source"], "url")
-        self.assertEqual(
-            plugin["source"]["url"],
-            "https://github.com/chromapaw/codex-chromapaw.git",
-        )
-        self.assertEqual(plugin["source"]["ref"], "main")
+        self.assertEqual(plugin["source"], {"source": "local", "path": "."})
         self.assertEqual(plugin["policy"]["installation"], "AVAILABLE")
         self.assertEqual(plugin["policy"]["authentication"], "ON_INSTALL")
         self.assertEqual(plugin["category"], "Creativity")
@@ -125,6 +120,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_release_automation_assets_exist(self) -> None:
         expected = (
             ".github/workflows/ci.yml",
+            ".github/workflows/release.yml",
+            ".github/dependabot.yml",
             "scripts/release_check.py",
             "requirements-dev.txt",
             "docs/RELEASE_CHECKLIST.md",
@@ -134,6 +131,34 @@ class PluginStructureTests(unittest.TestCase):
         )
         for relative in expected:
             self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_repository_community_assets_exist(self) -> None:
+        expected = (
+            "CODE_OF_CONDUCT.md",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "SUPPORT.md",
+            "docs/GITHUB_MAINTAINER_SETUP.md",
+            ".github/CODEOWNERS",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+            ".github/ISSUE_TEMPLATE/config.yml",
+            ".github/ISSUE_TEMPLATE/bug_report.yml",
+            ".github/ISSUE_TEMPLATE/compatibility_report.yml",
+            ".github/ISSUE_TEMPLATE/feature_request.yml",
+        )
+        for relative in expected:
+            self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_workflows_pin_remote_actions_to_commits(self) -> None:
+        import re
+
+        action_pattern = re.compile(r"^[^\s@]+/[^\s@]+@[0-9a-f]{40}$")
+        for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for action in re.findall(r"^\s*uses:\s*([^\s#]+)", text, flags=re.MULTILINE):
+                if action.startswith("./") or action.startswith("docker://"):
+                    continue
+                self.assertRegex(action, action_pattern, f"{workflow.name}: {action}")
 
 
 if __name__ == "__main__":

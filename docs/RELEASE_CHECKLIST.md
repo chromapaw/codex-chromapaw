@@ -45,11 +45,13 @@ python scripts/smoke_test_install.py --source . --ref= --json
 
 1. Push the candidate commit to GitHub.
 2. Create a new isolated `CODEX_HOME` outside a temporary-directory root that Codex refuses for helper binaries.
-3. Add the `chromapaw/codex-chromapaw` marketplace and install `codex-chromapaw@chromapaw`.
-4. Confirm `codex plugin list` reports the plugin as installed and enabled.
+3. Add the `chromapaw/codex-chromapaw` marketplace at the exact candidate branch or release tag and install `codex-chromapaw@chromapaw`.
+4. Confirm the smoke-test result reports the same manifest version as that selected marketplace snapshot and `codex plugin list` reports the plugin as installed and enabled.
 5. Start a new Codex task and verify that natural-language pet and skin requests route to the expected skills.
 6. Install or explicitly point to a real compatible `hatch-pet` dependency before pet generation. The mock contract used by the repository smoke test proves dependency discovery only; it is not pet generation or visual-QA evidence.
 7. Generate and validate one pet and one skin from fresh references.
+
+The automated tag workflow currently pins `@openai/codex@0.144.2` for the marketplace installation gate. Update that pin deliberately when a newer CLI has passed local and pull-request compatibility testing.
 8. On an enabled Windows adapter, activate the skin, close Codex, relaunch from both ChromaPaw shortcuts, and restore.
 9. Confirm the ordinary application shortcut still opens the default appearance.
 
@@ -64,6 +66,9 @@ python scripts/smoke_test_install.py --source . --ref= --json
 ## Publication
 
 - Ensure the worktree is clean and `CHANGELOG.md` matches the manifest's release version; local `+codex.<cachebuster>` build metadata does not create a separate public release.
-- Tag `v<manifest-version>` only after the candidate commit passes CI.
+- Create an annotated `v<manifest-version>` tag only after the candidate commit passes CI and is reachable from `main`; sign the tag when a maintainer signing identity is available.
+- Let `.github/workflows/release.yml` re-run the release gate and isolated installation before publication.
+- Verify that the release contains deterministic zip and tar archives, an SPDX JSON SBOM, and `SHA256SUMS.txt`.
 - Publish release notes that name exact live-tested Codex versions and all known unsupported routes.
 - Re-run the isolated GitHub installation smoke test against the published tag.
+- Re-audit the branch, security, discussion, and release settings in [GitHub maintainer setup](GITHUB_MAINTAINER_SETUP.md).

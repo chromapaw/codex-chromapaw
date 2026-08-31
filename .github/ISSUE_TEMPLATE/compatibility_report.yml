@@ -1,0 +1,45 @@
+name: Codex compatibility report
+description: Report discovery results for a new Codex build without requesting unsafe activation bypasses.
+title: "[Compatibility]: "
+labels:
+  - question
+body:
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 24H2 or macOS 15.x
+    validations:
+      required: true
+  - type: input
+    id: codex-version
+    attributes:
+      label: Exact Codex version and distribution
+      placeholder: 26.x.x.x, Microsoft Store/AppX or /Applications/Codex.app
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Sanitized discovery or preflight result
+      description: Remove usernames, absolute paths, hashes tied to private builds, tokens, ports, and task content.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: observation
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I did not modify `WindowsApps`, a signed executable, an `.app` bundle, or `app.asar`.
+          required: true
+        - label: I understand an unknown version must remain activation-disabled until exact-version acceptance is complete.
+          required: true
+        - label: I removed private and security-sensitive information from this report.
+          required: true

@@ -248,6 +248,12 @@
                 "subjectPlacement": {
                   "enum": ["source", "left", "right", "edge-balanced"]
                 },
+                "subjectDisplayPriority": {
+                  "enum": ["ambient", "supporting", "showcase"]
+                },
+                "contentLayout": {
+                  "enum": ["default", "reserve-subject"]
+                },
                 "artworkRecomposed": {"type": "boolean"},
                 "globalWashOpacity": {
                   "type": "number",

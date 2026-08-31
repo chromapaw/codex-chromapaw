@@ -2,9 +2,15 @@
 
 ## Reporting a vulnerability
 
-Do not publish an exploit in a public issue. Contact the maintainers through the repository owner's private channel or GitHub Security Advisories when enabled.
+Do not publish an exploit in a public issue. Use the repository's [private vulnerability reporting form](https://github.com/chromapaw/codex-chromapaw/security/advisories/new). If that form is unavailable, do not post the report publicly; open a non-sensitive support discussion asking a maintainer to enable the private channel.
 
 Include the affected version, operating system, reproduction steps, impact, and suggested mitigation. Do not attach private source images, runtime state files, screenshots, or access tokens.
+
+Maintainers aim to acknowledge a complete report within seven calendar days and provide a status update within fourteen days. These targets are best-effort for a volunteer project, not a service-level agreement.
+
+## Supported versions
+
+Security fixes target the latest published release and the current `main` branch. Older releases may receive a backport only when the impact is severe and the change can be made without weakening runtime compatibility gates. Unsupported Codex versions remain activation-disabled instead of receiving speculative fixes.
 
 ## Trust boundary
 

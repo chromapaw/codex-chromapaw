@@ -39,6 +39,7 @@ from windows_runtime import (  # noqa: E402
     resume_runtime,
     restore_runtime,
     restore_allowlisted_config,
+    _print_result,
     select_adapter,
     _process_identity_status,
     _terminate_process_tree,
@@ -525,7 +526,7 @@ class WindowsRuntimeTests(unittest.TestCase):
             ), mock.patch("windows_runtime._terminate_monitor_process") as terminate, mock.patch(
                 "windows_runtime.inject_until_ready",
                 return_value=[{"targetId": "fixture", "result": {"applied": True}}],
-            ), mock.patch("windows_runtime._launch_monitor", return_value=monitor), mock.patch(
+            ), mock.patch("windows_runtime._launch_monitor", return_value=monitor) as launch, mock.patch(
                 "windows_runtime._record_process_creation_time", return_value=333
             ):
                 result = refresh_active_runtime_css(
@@ -534,6 +535,7 @@ class WindowsRuntimeTests(unittest.TestCase):
                     acknowledged=True,
                 )
             terminate.assert_called_once()
+            launch.assert_called_once_with(data_dir, "fixture-session", "e" * 64)
             self.assertEqual(result["status"], "refreshed")
             self.assertEqual(result["monitorPid"], 303)
             saved = json.loads((data_dir / "active.json").read_text(encoding="utf-8"))
@@ -870,6 +872,7 @@ class WindowsRuntimeTests(unittest.TestCase):
                 data_dir,
                 operation="restore",
                 expected_session_id=mock.ANY,
+                recover_stale_identities=True,
             )
             activate.assert_called_once()
             self.assertTrue(result["resumed"])
@@ -921,7 +924,78 @@ class WindowsRuntimeTests(unittest.TestCase):
                 data_dir,
                 operation="restore",
                 expected_session_id="observed-session",
+                recover_stale_identities=True,
             )
+
+    def test_stale_restore_skips_reused_monitor_after_codex_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            state = {
+                "schemaVersion": 1,
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "pid": 101,
+                "processCreationTime": 111,
+                "executable": "C:/fixture/ChatGPT.exe",
+                "executableHash": "a" * 64,
+                "monitorPid": 202,
+                "monitorCreationTime": 222,
+                "monitorExecutable": str(Path(sys.executable).resolve()),
+                "monitorExecutableHash": "b" * 64,
+                "port": 12345,
+                "allowedTargetSchemes": ["app"],
+                "cssHash": "c" * 64,
+                "backupDir": str(backup_dir),
+                "packageId": "fixture-skin",
+                "appVersion": "26.707.9981.0",
+            }
+            (data_dir / "active.json").write_text(json.dumps(state), encoding="utf-8")
+            reused = {
+                "running": True,
+                "pathMatches": True,
+                "creationTimeMatches": False,
+                "executableHashMatches": True,
+                "matches": False,
+            }
+            exited = {
+                "running": False,
+                "pathMatches": False,
+                "creationTimeMatches": False,
+                "executableHashMatches": True,
+                "matches": False,
+            }
+            with mock.patch(
+                "windows_runtime._process_identity_status", side_effect=[reused, exited]
+            ), mock.patch(
+                "windows_runtime._terminate_monitor_process"
+            ) as terminate_monitor, mock.patch(
+                "windows_runtime._terminate_runtime_process"
+            ) as terminate_codex, mock.patch(
+                "windows_runtime.CdpEndpoint"
+            ) as endpoint, mock.patch(
+                "windows_runtime.remove_css"
+            ) as remove, mock.patch(
+                "windows_runtime._config_backup_status", return_value={"unchanged": True}
+            ):
+                result = restore_runtime(
+                    data_dir,
+                    expected_session_id="fixture-session",
+                    recover_stale_identities=True,
+                )
+
+            terminate_monitor.assert_not_called()
+            terminate_codex.assert_not_called()
+            endpoint.assert_not_called()
+            remove.assert_not_called()
+            self.assertFalse((data_dir / "active.json").exists())
+            self.assertFalse(result["process"]["skipped"])
+            self.assertEqual(result["process"]["reason"], "already-exited")
+            self.assertTrue(result["monitor"]["skipped"])
+            self.assertIsNone(result["transportClosed"])
+            final = json.loads((backup_dir / "final.json").read_text(encoding="utf-8"))
+            self.assertTrue(final["staleIdentityRecovery"])
 
     def test_resume_rejects_session_change_between_status_and_state_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1318,6 +1392,29 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertNotIn('url("./background.png")', compiled["css"])
             self.assertRegex(compiled["cssHash"], r"^[0-9a-f]{64}$")
 
+    def test_json_output_falls_back_to_utf8_when_console_cannot_encode(self) -> None:
+        class LegacyConsole:
+            encoding = "gbk"
+
+            def write(self, value: str) -> int:
+                raise UnicodeEncodeError("gbk", value, 0, 1, "fixture")
+
+        class BinaryCapture:
+            def __init__(self) -> None:
+                self.data = b""
+
+            def write(self, value: bytes) -> int:
+                self.data += value
+                return len(value)
+
+        capture = BinaryCapture()
+        console = LegacyConsole()
+        console.buffer = capture
+        with mock.patch.object(sys, "stdout", console):
+            _print_result({"message": "Kyoto Rooftop �"}, True)
+
+        self.assertIn("Kyoto Rooftop �", capture.data.decode("utf-8"))
+
     def test_launcher_only_runtime_upgrade_keeps_compiled_css_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             package = make_v2_package(Path(temporary))
@@ -1370,6 +1467,67 @@ class WindowsRuntimeTests(unittest.TestCase):
 
             thread = threading.Thread(target=run_monitor, daemon=True)
             thread.start()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline and not server.fixture_state.present:
+                time.sleep(0.05)
+            self.assertTrue(server.fixture_state.present)
+            active_path.unlink()
+            thread.join(timeout=3)
+            self.assertEqual(result, [0])
+
+    def test_monitor_waits_for_reviewed_css_refresh_state_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, FakeCdpServer() as server:
+            root = Path(temporary)
+            package = make_v2_package(root)
+            compiled = compile_skin(package)
+            data_dir = root / "runtime-state"
+            backup_dir = data_dir / "sessions" / "fixture-session"
+            backup_dir.mkdir(parents=True)
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture")
+            adapter_file = ROOT / "runtime" / "windows-adapters.json"
+            active = {
+                "schemaVersion": 1,
+                "sessionId": "fixture-session",
+                "sessionToken": "fixture-token",
+                "package": str(package),
+                "cssHash": "b" * 64,
+                "port": server.server_address[1],
+                "allowedTargetSchemes": ["app"],
+                "backupDir": str(backup_dir),
+                "pid": 1,
+                "executable": str(executable),
+                "executableHash": hashlib.sha256(b"fixture").hexdigest(),
+                "adapterId": "chatgpt-electron-26-707-9981",
+                "adapterFile": str(adapter_file),
+                "adapterFileHash": hashlib.sha256(adapter_file.read_bytes()).hexdigest(),
+            }
+            active_path = data_dir / "active.json"
+            active_path.write_text(json.dumps(active), encoding="utf-8")
+            result: list[int] = []
+
+            def run_monitor() -> None:
+                with mock.patch(
+                    "windows_runtime.probe_executable_identity",
+                    return_value=STANDALONE_EXECUTABLE_IDENTITY,
+                ):
+                    result.append(
+                        monitor_runtime(
+                            data_dir,
+                            "fixture-session",
+                            interval=0.1,
+                            expected_css_hash=compiled["cssHash"],
+                            startup_wait_seconds=2.0,
+                        )
+                    )
+
+            thread = threading.Thread(target=run_monitor, daemon=True)
+            thread.start()
+            time.sleep(0.15)
+            self.assertTrue(thread.is_alive())
+            active["cssHash"] = compiled["cssHash"]
+            active_path.write_text(json.dumps(active), encoding="utf-8")
             deadline = time.monotonic() + 4
             while time.monotonic() < deadline and not server.fixture_state.present:
                 time.sleep(0.05)

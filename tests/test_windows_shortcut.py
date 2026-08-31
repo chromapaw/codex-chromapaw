@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from windows_shortcut import (  # noqa: E402
     RuntimeFailure,
+    _publish_hosted_generation,
     _write_shortcut,
     inspect_shortcut,
     install_shortcut,
@@ -27,6 +28,35 @@ from windows_shortcut import (  # noqa: E402
 
 @unittest.skipUnless(os.name == "nt", "Windows shortcut integration test")
 class WindowsShortcutTests(unittest.TestCase):
+    def test_hosted_generation_publish_retries_transient_windows_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            staging = root / ".staging-fixture"
+            generation = root / "sha256-fixture"
+            staging.mkdir()
+            real_replace = os.replace
+            calls = 0
+
+            def transient_replace(source: Path, target: Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls < 3:
+                    raise PermissionError(5, "fixture directory lock")
+                real_replace(source, target)
+
+            with mock.patch(
+                "windows_shortcut.os.replace", side_effect=transient_replace
+            ), mock.patch("windows_shortcut.time.sleep") as pause:
+                _publish_hosted_generation(
+                    staging,
+                    generation,
+                    {"generation": "sha256-fixture", "bundleHash": "fixture", "files": []},
+                )
+
+            self.assertEqual(calls, 3)
+            self.assertEqual(pause.call_count, 2)
+            self.assertTrue(generation.is_dir())
+
     def test_cli_hides_legacy_acknowledgements(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(SCRIPTS / "windows_shortcut.py"), "install", "--help"],

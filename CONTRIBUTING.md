@@ -2,6 +2,8 @@
 
 Thank you for helping make Codex customization safer and more approachable.
 
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). Use [Support](SUPPORT.md) to choose between discussions, issue forms, compatibility reports, and private security reporting.
+
 ## Before opening a change
 
 1. Search existing issues and discussions.
@@ -9,6 +11,14 @@ Thank you for helping make Codex customization safer and more approachable.
 3. Do not add code that modifies `WindowsApps`, signed executables, or `app.asar`.
 4. Do not commit copyrighted or private images without clear redistribution permission.
 5. Document every new permission, network interface, background process, local port, or recovery behavior.
+
+## Development workflow
+
+1. Fork the repository and create a focused branch from `main`.
+2. Add or update deterministic tests before changing runtime behavior.
+3. Keep one `Unreleased` section in `CHANGELOG.md` and add a concise user-visible entry.
+4. Run the checks below and the relevant package or platform validator.
+5. Open a pull request using the repository template. Direct pushes to `main` are reserved for repository recovery.
 
 ## Development checks
 
@@ -19,6 +29,10 @@ python scripts/audit_pets.py --json --allow-issues
 ```
 
 Before release, validate the plugin and all skills with the scripts bundled with Codex's `plugin-creator` and `skill-creator` skills. Run the isolated marketplace installation smoke test after pushing the candidate commit and complete [the release checklist](docs/RELEASE_CHECKLIST.md).
+
+Dependency update pull requests are opened weekly for Python, npm, and GitHub Actions. Review generated lockfile changes and do not merge an update only because the version number is newer.
+
+Maintainers should keep the non-versioned GitHub repository settings aligned with [GitHub maintainer setup](docs/GITHUB_MAINTAINER_SETUP.md).
 
 ## Windows adapter acceptance
 

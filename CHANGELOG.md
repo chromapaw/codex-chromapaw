@@ -2,10 +2,27 @@
 
 ## Unreleased
 
+- Recover an ended Windows skin session when its recorded monitor or Codex PID has been recycled, without terminating or attaching to the unrelated replacement process; archive only the stale ChromaPaw state before starting the reviewed skin again.
+- Protect unframed landing and empty-state copy with compact image-derived reading carriers instead of increasing the full main-viewport wash, preserving scene depth while keeping uploaded dark or bright artwork readable.
+- Measure main-window text contrast against actual rendered screenshot pixels in the macOS compatibility harness, and decode renderer subprocess output as UTF-8 on legacy-code-page Windows test hosts.
+- Retry content-addressed Windows shortcut runtime publication across bounded transient antivirus or indexer directory locks while preserving immutable-generation verification and fail-closed errors.
+
+## 0.4.7 — 2026-08-25
+
+- Resolve the repository plugin from the selected marketplace snapshot instead of a nested `main` checkout, and make clean-install smoke tests fail when the installed version differs from the requested branch or tag.
+- Install a pinned, tested Codex CLI in release validation, verify the resolved tag for both push and manual-dispatch releases, and keep the committed npm lockfile on the official npm registry for reproducible public CI.
+- Decouple subject position from conversation width with image- and intent-aware `subjectDisplayPriority` plus automatic `contentLayout` resolution; ambient/supporting scenery keeps normal Codex width, while only a side-staged showcase subject reserves space.
+- Record the resolved layout decision in package metadata and structured QA, and render previews with the same default-width or reserved-width policy used by runtime CSS.
+- Prevent the Windows CSS monitor from rejecting a legitimate hot refresh when it starts before the new reviewed CSS hash has been transactionally committed; the monitor now pins the expected hash and waits for the matching state handoff without weakening ordinary startup checks.
+- Give Codex's current Electron application header an image-derived glass surface with independently contrast-checked menu, navigation, and window-control colors, and render it in all Skin Studio previews.
+- Preserve structured runtime results as UTF-8 when hidden Windows handoff processes inherit a legacy console encoding, preventing a successful restore from being misreported as a launcher failure.
 - Pin every reviewed Windows skin preference to the exact content-addressed hosted runtime generation used by its shortcut, so later plugin or adapter updates cannot invalidate a previously approved relaunch.
 - Keep the technical failure details in the local launcher log while opening the hash-verified ordinary Codex executable when skin recovery cannot start, instead of blocking users with adapter or CSS hash dialogs.
 - Preserve the pinned generation during shortcut upgrades and retain prior immutable generations for reviewed-skin continuity.
 - Decouple compiled skin identity from launcher-only runtime versions, preventing a code-only update from looking like a user skin edit.
+- Add a complete GitHub community surface with conduct, support, issue, compatibility, pull-request, ownership, and dependency-update policies.
+- Pin every third-party GitHub Action to a reviewed commit and add a tag-gated release workflow that validates, smoke-installs, archives, inventories, checksums, and publishes the plugin.
+- Add repository health badges, an honest beta boundary, and a one-image workflow diagram to the project landing page.
 
 ## 0.4.6 — 2026-08-13
 

@@ -58,4 +58,10 @@ For subject conflicts, ask image generation for a desktop-width adaptation with 
 
 Build the image-generation prompt from the user request and validated profile. Include the reference image for identity grounding. Do not add beach objects to a sky image, plants to a comic image, city elements to an abstract texture, or any other category that lacks support in the current inputs.
 
-After expansion or recomposition, review the result against every identity cue, motif, forbidden element, depth description, and safe-zone instruction before passing it to the deterministic builder. Record the actual subject side with `prepare_skin_request.py --subject-placement`.
+After expansion or recomposition, review the result against every identity cue, motif, forbidden element, depth description, and safe-zone instruction before passing it to the deterministic builder. Record the actual subject side with `prepare_skin_request.py --subject-placement`, then separately record its display priority with `--subject-display-priority`:
+
+- `ambient`: ordinary scenery or texture that never needs reserved interface space;
+- `supporting`: recognizable theme content that may appear beneath local glass surfaces;
+- `showcase`: a hero character, logo, or object whose unobstructed display is a primary goal.
+
+Do not infer `showcase` from the mere presence of a person, character, or object. With `--content-layout auto`, only a left/right showcase subject reserves conversation space; all other images retain normal Codex content width.

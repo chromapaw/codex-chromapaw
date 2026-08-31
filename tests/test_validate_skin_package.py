@@ -186,6 +186,17 @@ class SkinPackageValidationTests(unittest.TestCase):
                 "--vscode-titleBar-activeForeground: var(--chromapaw-ink) !important",
                 css,
             )
+            self.assertIn(".app-header-tint {", css)
+            self.assertIn("--chromapaw-titlebar-surface-rgb:", css)
+            self.assertIn(
+                "color: var(--chromapaw-titlebar-text-secondary) !important",
+                css,
+            )
+            self.assertIn(
+                ".app-header-tint button[aria-expanded=\"true\"]",
+                css,
+            )
+            self.assertIn("backdrop-filter: blur(18px)", css)
             self.assertIn(
                 "--color-token-input-background: rgb(var(--chromapaw-surface-input-rgb)",
                 css,
@@ -196,6 +207,9 @@ class SkinPackageValidationTests(unittest.TestCase):
                 css,
             )
             self.assertIn("--chromapaw-content-veil:", css)
+            self.assertIn("--chromapaw-unframed-reading-surface:", css)
+            self.assertIn(":has(+ :where(h1, h2, [role=\"heading\"]))", css)
+            self.assertIn(":has(+ p):not([data-turn-key] *)", css)
             self.assertIn(
                 "[data-thread-find-target] [data-turn-key]::before",
                 css,
@@ -250,7 +264,7 @@ class SkinPackageValidationTests(unittest.TestCase):
             self.assertEqual(fidelity["status"], "pass")
             self.assertFalse(fidelity["value"]["backgroundBlur"])
 
-    def test_subject_placement_selects_directional_local_veil(self) -> None:
+    def test_showcase_subject_selects_directional_veil_and_reserves_space(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "hero.png"
@@ -267,6 +281,8 @@ class SkinPackageValidationTests(unittest.TestCase):
                     mode="adaptive",
                     scene_brief=None,
                     subject_placement="right",
+                    subject_display_priority="showcase",
+                    content_layout="auto",
                     author="Test artist",
                     license="CC0-1.0",
                     source_url=None,
@@ -288,6 +304,65 @@ class SkinPackageValidationTests(unittest.TestCase):
             self.assertEqual(
                 manifest["layout"]["visualTreatment"]["subjectPlacement"], "right"
             )
+            self.assertEqual(
+                manifest["layout"]["visualTreatment"]["subjectDisplayPriority"],
+                "showcase",
+            )
+            self.assertEqual(
+                manifest["layout"]["visualTreatment"]["contentLayout"],
+                "reserve-subject",
+            )
+            self.assertEqual(validate_package(package), [])
+
+    def test_supporting_side_subject_keeps_default_conversation_width(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "environment.png"
+            write_rgba_png(image, 96, 64)
+            _, profile_path = make_theme_profile(root, image)
+            request = build_request(
+                Namespace(
+                    image=image,
+                    artwork=image,
+                    theme_profile=profile_path,
+                    name="Supporting Right Subject",
+                    id="supporting-right-subject",
+                    description="A complete scene whose right subject remains decorative.",
+                    mode="adaptive",
+                    scene_brief=None,
+                    subject_placement="right",
+                    subject_display_priority="supporting",
+                    content_layout="auto",
+                    author="Test artist",
+                    license="CC0-1.0",
+                    source_url=None,
+                )
+            )
+            request_path = root / "skin-request.json"
+            request_path.write_text(json.dumps(request), encoding="utf-8")
+            package = root / "package"
+            build_package(request_path, package)
+
+            css = (package / "assets" / "theme.css").read_text(encoding="utf-8")
+            self.assertIn("linear-gradient(90deg", css)
+            self.assertIn("--chromapaw-reading-max-inline: 100%", css)
+            self.assertNotIn("--chromapaw-reading-max-inline: 66%", css)
+            manifest = json.loads((package / "skin.json").read_text(encoding="utf-8"))
+            treatment = manifest["layout"]["visualTreatment"]
+            self.assertEqual(treatment["subjectPlacement"], "right")
+            self.assertEqual(treatment["subjectDisplayPriority"], "supporting")
+            self.assertEqual(treatment["contentLayout"], "default")
+            report = json.loads(
+                (package / "qa" / "skin-studio-report.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            layout_check = next(
+                check
+                for check in report["checks"]
+                if check["id"] == "dynamic-content-layout"
+            )
+            self.assertFalse(layout_check["value"]["reserveSubjectSpace"])
             self.assertEqual(validate_package(package), [])
 
     def test_semantic_ui_palette_keeps_muted_and_accent_text_accessible(self) -> None:
@@ -323,6 +398,8 @@ class SkinPackageValidationTests(unittest.TestCase):
                 ("sidePanelText", "sidePanelSurface"),
                 ("sidePanelSecondaryText", "sidePanelSurface"),
                 ("sidePanelSectionText", "sidePanelSectionSurface"),
+                ("titleBarText", "titleBarSurface"),
+                ("titleBarSecondaryText", "titleBarSurface"),
             ):
                 self.assertGreaterEqual(
                     contrast_ratio(ui[surface_role], ui[role]),

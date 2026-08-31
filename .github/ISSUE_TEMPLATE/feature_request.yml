@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a focused improvement to ChromaPaw.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem rather than only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform scope
+      options:
+        - Platform neutral
+        - Windows
+        - macOS
+        - Both Windows and macOS
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety, privacy, and compatibility impact
+      description: Note any new permissions, network calls, ports, background processes, application-file changes, or copyrighted assets.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues, discussions, and the roadmap.
+          required: true
+        - label: This proposal preserves explicit confirmation for installation, replacement, activation, and recovery actions.
+          required: true
