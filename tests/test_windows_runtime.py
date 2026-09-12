@@ -28,6 +28,7 @@ from windows_runtime import (  # noqa: E402
     codex_locale_status,
     inspect_runtime_locale,
     activate_runtime,
+    atomic_json,
     close_matching_codex_processes,
     compile_skin,
     detect_app_version,
@@ -1762,7 +1763,9 @@ class WindowsRuntimeTests(unittest.TestCase):
             time.sleep(0.15)
             self.assertTrue(thread.is_alive())
             active["cssHash"] = compiled["cssHash"]
-            active_path.write_text(json.dumps(active), encoding="utf-8")
+            # Match the production refresh transaction: the concurrent monitor
+            # must observe either the old state or the complete new JSON.
+            atomic_json(active_path, active)
             deadline = time.monotonic() + 4
             while time.monotonic() < deadline and not server.fixture_state.present:
                 time.sleep(0.05)

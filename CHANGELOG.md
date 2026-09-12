@@ -5,6 +5,7 @@
 ## 0.4.8 — 2026-09-12
 
 - Normalize recovery-test fixture paths so Windows short temporary paths and macOS `/var` aliases exercise the same identity checks as resolved runtime paths.
+- Publish the concurrent CSS-refresh test state atomically, matching production behavior and avoiding truncated-JSON races in CI.
 - Verify installed plugin files against the selected marketplace snapshot by SHA-256, rejecting missing modules and stale same-version content; exclude local dependency, cache, and artifact directories from installation staging.
 - Update management guidance for reviewed next-launch activation, official Store launcher recovery, and project-sidebar repair, keeping upgrades separate from live runtime activation.
 
