@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+import hashlib
 import json
 import os
 import shutil
@@ -26,6 +27,10 @@ except ImportError:
 PLUGIN_NAME = "codex-chromapaw"
 MARKETPLACE_NAME = "chromapaw"
 ROOT = Path(__file__).resolve().parents[1]
+STAGING_EXCLUDES = (
+    ".git", ".venv", "__pycache__", "*.pyc", ".pytest_cache", "node_modules",
+    "build", "dist", "generated", "outputs", "work", "artifacts", "*.log",
+)
 
 
 class SmokeTestError(RuntimeError):
@@ -167,27 +172,61 @@ def write_mock_hatch_pet(codex_home: Path) -> Path:
     return root
 
 
+def plugin_file_hashes(plugin_root: Path) -> dict[str, str]:
+    """Inventory the distributable snapshot without following linked content."""
+    hashes: dict[str, str] = {}
+    ignore = shutil.ignore_patterns(*STAGING_EXCLUDES)
+    for directory, directories, files in os.walk(plugin_root, followlinks=False):
+        base = Path(directory)
+        excluded = ignore(directory, directories + files)
+        directories[:] = sorted(name for name in directories if name not in excluded)
+        for name in directories + sorted(name for name in files if name not in excluded):
+            path = base / name
+            relative = path.relative_to(plugin_root).as_posix()
+            if path.is_symlink() or path.resolve() != path.absolute():
+                raise SmokeTestError(f"plugin snapshot contains a linked path: {relative}")
+            if name in directories:
+                continue
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            hashes[relative] = digest.hexdigest()
+    return hashes
+
+
+def verify_installed_content(selected_root: Path, installed_root: Path) -> int:
+    expected = plugin_file_hashes(selected_root.resolve())
+    actual = plugin_file_hashes(installed_root.resolve())
+    missing = sorted(expected.keys() - actual.keys())
+    unexpected = sorted(actual.keys() - expected.keys())
+    changed = sorted(path for path in expected.keys() & actual.keys()
+                     if expected[path] != actual[path])
+    if missing or unexpected or changed:
+        raise SmokeTestError(
+            "installed plugin content does not match the selected marketplace snapshot: "
+            f"missing={missing}, unexpected={unexpected}, changed={changed}"
+        )
+    return len(expected)
+
+
 def stage_local_marketplace(plugin_root: Path, staging_root: Path) -> Path:
     """Copy the root-plugin marketplace into a clean temporary snapshot."""
     plugin_root = plugin_root.expanduser().resolve()
     if not (plugin_root / ".codex-plugin" / "plugin.json").is_file():
         raise SmokeTestError(f"local plugin source has no manifest: {plugin_root}")
     marketplace_root = staging_root.expanduser().resolve()
+    if marketplace_root == plugin_root or (
+        plugin_root in marketplace_root.parents
+        and marketplace_root.relative_to(plugin_root).parts[0] not in STAGING_EXCLUDES
+    ):
+        raise SmokeTestError("local marketplace staging must be outside the distributable source")
+    plugin_file_hashes(plugin_root)
     shutil.copytree(
         plugin_root,
         marketplace_root,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            "*.pyc",
-            "build",
-            "dist",
-            "generated",
-            "outputs",
-            "work",
-        ),
+        ignore=shutil.ignore_patterns(*STAGING_EXCLUDES),
     )
     marketplace_file = marketplace_root / ".agents" / "plugins" / "marketplace.json"
     if not marketplace_file.is_file():
@@ -229,6 +268,7 @@ def smoke_test(
     plugin_root, installed_version = installed_plugin_from_result(
         installation, codex_home, expected_version
     )
+    verified_files = verify_installed_content(selected_root, plugin_root)
     dependency_script = plugin_root / "scripts" / "check_dependencies.py"
     if not dependency_script.is_file():
         raise SmokeTestError("installed plugin is missing scripts/check_dependencies.py")
@@ -262,6 +302,8 @@ def smoke_test(
         "plugin": PLUGIN_NAME,
         "version": installed_version,
         "pluginRoot": str(plugin_root),
+        "verifiedFiles": verified_files,
+        "contentMatchesSnapshot": True,
         "mockHatchPet": str(mock_hatch_pet),
         "marketplaceResult": marketplace.stdout.strip(),
         "installResult": installation.stdout.strip(),

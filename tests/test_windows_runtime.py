@@ -24,6 +24,9 @@ sys.path.insert(0, str(SCRIPTS))
 from cdp_client import CdpEndpoint, CdpError, inject_css, remove_css, verify_css  # noqa: E402
 from windows_runtime import (  # noqa: E402
     RuntimeFailure,
+    _launch_codex,
+    codex_locale_status,
+    inspect_runtime_locale,
     activate_runtime,
     close_matching_codex_processes,
     compile_skin,
@@ -43,6 +46,7 @@ from windows_runtime import (  # noqa: E402
     select_adapter,
     _process_identity_status,
     _terminate_process_tree,
+    _verify_renderer_readback,
 )
 try:
     from tests.test_validate_skin_package import make_v2_package  # type: ignore  # noqa: E402
@@ -78,6 +82,19 @@ APPX_EXECUTABLE_IDENTITY = {
     "signatureStatus": "Valid",
     "signerSubject": 'CN="OpenAI OpCo, LLC", O="OpenAI OpCo, LLC", C=US',
     "sha256": "0" * 64,
+}
+
+CURRENT_APPX_EXECUTABLE_IDENTITY = {
+    "fileVersion": "152.0.7977.64",
+    "productVersion": "152.0.7977.64",
+    "productName": "Codex",
+    "companyName": "OpenAI OpCo, LLC",
+    "fileDescription": "Codex",
+    "originalFilename": "chrome.exe",
+    "internalName": "chrome_exe",
+    "signatureStatus": "Valid",
+    "signerSubject": 'CN="OpenAI OpCo, LLC", O="OpenAI OpCo, LLC", C=US',
+    "sha256": "a7b0a4f38508d69a85ea51af9f6bd6a42c24a3904159ddff4d4d181eaadfff1c",
 }
 
 
@@ -257,6 +274,84 @@ class FakeCdpServer(socketserver.ThreadingTCPServer):
 
 
 class WindowsRuntimeTests(unittest.TestCase):
+    def test_codex_locale_status_reads_and_normalises_desktop_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.toml"
+            config.write_text(
+                "localeOverride = 'en-US'\n[desktop]\nlocaleOverride = 'zh_cn'\n",
+                encoding="utf-8",
+            )
+            result = codex_locale_status(config)
+            self.assertTrue(result["valid"])
+            self.assertEqual(result["requested"], "zh-CN")
+            self.assertEqual(result["source"], "desktop.localeOverride")
+
+    def test_codex_locale_status_rejects_non_locale_value_without_raising(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / "config.toml"
+            config.write_text('[desktop]\nlocaleOverride = "zh-CN --inspect"\n', encoding="utf-8")
+            result = codex_locale_status(config)
+            self.assertFalse(result["valid"])
+            self.assertIsNone(result["requested"])
+            self.assertIn("not a valid locale", result["error"])
+
+    def test_launch_codex_passes_normalised_locale_as_one_argument(self) -> None:
+        executable = Path("C:/Codex/app-26.707.9981.0/ChatGPT.exe")
+        process = mock.Mock()
+        with mock.patch("windows_runtime.subprocess.Popen", return_value=process) as popen:
+            result = _launch_codex(executable, 54321, None, "zh_cn")
+        self.assertIs(result, process)
+        args = popen.call_args.args[0]
+        self.assertIn("--lang=zh-CN", args)
+        self.assertEqual(args.count("--lang=zh-CN"), 1)
+
+    def test_launch_codex_dispatches_appx_strategy_without_direct_popen(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary) / "profile"
+            executable = Path("C:/WindowsApps/OpenAI.Codex_26.901.1978.0_x64/app/ChatGPT.exe")
+            process = mock.Mock(pid=101)
+            adapter = {
+                "launchStrategy": {
+                    "kind": "appx-activation-manager",
+                    "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App",
+                }
+            }
+            with mock.patch(
+                "windows_runtime._launch_packaged_codex", return_value=process
+            ) as packaged, mock.patch("windows_runtime.subprocess.Popen") as popen:
+                result = _launch_codex(
+                    executable,
+                    54321,
+                    profile,
+                    "zh-CN",
+                    adapter,
+                )
+            self.assertIs(result, process)
+            popen.assert_not_called()
+            self.assertEqual(packaged.call_args.args[0], executable)
+            switches = packaged.call_args.args[1]
+            self.assertIn("--lang=zh-CN", switches)
+            self.assertIn(f"--user-data-dir={profile}", switches)
+
+    def test_inspect_runtime_locale_requires_main_document_and_navigator_match(self) -> None:
+        target = mock.Mock(id="main", url="app://-/index.html")
+        endpoint = mock.Mock()
+        endpoint.targets.return_value = [target]
+        endpoint.evaluate.return_value = {
+            "navigatorLanguage": "zh-cn",
+            "documentLanguage": "zh-CN",
+        }
+        result = inspect_runtime_locale(endpoint, {"app"}, "zh_CN")
+        self.assertTrue(result["matches"])
+        self.assertEqual(result["requested"], "zh-CN")
+
+        endpoint.evaluate.return_value = {
+            "navigatorLanguage": "zh-CN",
+            "documentLanguage": "en",
+        }
+        result = inspect_runtime_locale(endpoint, {"app"}, "zh-CN")
+        self.assertFalse(result["matches"])
+
     def test_runtime_lock_ignores_leftover_metadata_after_owner_exit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             data_dir = Path(temporary)
@@ -725,6 +820,60 @@ class WindowsRuntimeTests(unittest.TestCase):
 
     def test_refresh_active_css_rolls_back_on_preference_write_failure(self) -> None:
         self._assert_refresh_write_failure_rolls_back(3)
+
+    def test_renderer_readback_retries_only_transient_timeout(self) -> None:
+        timeout = CdpError("CDP websocket request failed: timed out")
+        timeout.__cause__ = TimeoutError("timed out")
+        checks = [{"targetId": "main", "result": {"matches": True}}]
+        state = {"cssHash": "a" * 64, "sessionToken": "fixture"}
+        with mock.patch("windows_runtime.verify_css", side_effect=[timeout, checks]) as verify, mock.patch(
+            "windows_runtime.time.sleep"
+        ) as sleep:
+            result = _verify_renderer_readback(mock.Mock(), state, {"app"})
+        self.assertEqual(result, (checks, None, True))
+        self.assertEqual(verify.call_count, 2)
+        sleep.assert_called_once_with(0.4)
+
+    def test_renderer_readback_persistent_timeout_remains_failure(self) -> None:
+        timeout = CdpError("CDP websocket request failed: timed out")
+        timeout.__cause__ = TimeoutError("timed out")
+        with mock.patch("windows_runtime.verify_css", side_effect=timeout) as verify, mock.patch(
+            "windows_runtime.time.sleep"
+        ) as sleep:
+            with self.assertRaises(CdpError):
+                _verify_renderer_readback(mock.Mock(), {"cssHash": "a", "sessionToken": "b"}, {"app"})
+        self.assertEqual(verify.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_renderer_readback_does_not_retry_identity_or_script_errors(self) -> None:
+        with mock.patch("windows_runtime.verify_css", side_effect=CdpError("invalid target identity")) as verify, mock.patch(
+            "windows_runtime.time.sleep"
+        ) as sleep:
+            with self.assertRaises(CdpError):
+                _verify_renderer_readback(mock.Mock(), {"cssHash": "a", "sessionToken": "b"}, {"app"})
+        verify.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_renderer_readback_preserves_style_mismatch(self) -> None:
+        checks = [{"targetId": "main", "result": {"matches": False}}]
+        with mock.patch("windows_runtime.verify_css", return_value=checks) as verify:
+            result = _verify_renderer_readback(mock.Mock(), {"cssHash": "a", "sessionToken": "b"}, {"app"})
+        self.assertEqual(result[0], checks)
+        verify.assert_called_once()
+
+    def test_renderer_readback_retries_locale_timeout_and_rechecks_css(self) -> None:
+        timeout = CdpError("CDP websocket request failed: timed out")
+        timeout.__cause__ = TimeoutError("timed out")
+        state = {"cssHash": "a", "sessionToken": "b", "locale": {"requested": "zh-CN"}}
+        checks = [{"targetId": "main", "result": {"matches": True}}]
+        with mock.patch("windows_runtime.verify_css", return_value=checks) as verify, mock.patch(
+            "windows_runtime.codex_locale_status", return_value={"valid": True, "requested": "zh-CN"}
+        ), mock.patch("windows_runtime.inspect_runtime_locale", side_effect=[timeout, {"matches": False}]), mock.patch(
+            "windows_runtime.time.sleep"
+        ):
+            result = _verify_renderer_readback(mock.Mock(), state, {"app"})
+        self.assertEqual(verify.call_count, 2)
+        self.assertFalse(result[2])
 
     def test_runtime_status_requires_process_adapter_browser_and_style_continuity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1215,6 +1364,16 @@ class WindowsRuntimeTests(unittest.TestCase):
             target = endpoint.targets({"app"})[0]
             self.assertTrue(endpoint.capture_png(target).startswith(b"\x89PNG"))
 
+    def test_cdp_evaluate_normalises_transient_socket_timeout(self) -> None:
+        endpoint = CdpEndpoint(54321)
+        target = mock.Mock(websocket_url="ws://127.0.0.1:54321/devtools/page/fixture")
+        connection = mock.MagicMock()
+        connection.__enter__.return_value.send_json.side_effect = TimeoutError("timed out")
+        with mock.patch("cdp_client.WebSocketConnection", return_value=connection):
+            with self.assertRaises(CdpError) as context:
+                endpoint.evaluate(target, "1")
+        self.assertIn("websocket request failed", str(context.exception))
+
     def test_detects_clone_and_appx_versions(self) -> None:
         self.assertEqual(
             detect_app_version(Path("C:/Local/app-26.707.9981.0/ChatGPT.exe")),
@@ -1280,6 +1439,82 @@ class WindowsRuntimeTests(unittest.TestCase):
             self.assertEqual(
                 adapter["verifiedExecutableIdentity"]["productName"], "Codex"
             )
+
+    def test_matching_current_appx_selects_activation_manager_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = (
+                Path(temporary)
+                / "OpenAI.Codex_26.901.1978.0_x64__2p2nqsd0c76g0"
+                / "app"
+                / "ChatGPT.exe"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"fixture")
+            adapter = select_adapter(
+                executable,
+                _identity_probe=lambda _path: CURRENT_APPX_EXECUTABLE_IDENTITY,
+            )
+            self.assertTrue(adapter["activationEnabled"])
+            self.assertEqual(
+                adapter["launchStrategy"]["kind"], "appx-activation-manager"
+            )
+
+    def test_updated_appx_pins_exact_build_hash(self) -> None:
+        builds = {
+            "2854": "59569ff256d3e93ec5ec30505201cf11156b15c6c24130d66ff24105e4161fcf",
+            "5003": "39e59e44d3f3aa4f6b7813d61b018ec0389ff28b6671f3d20bf258f2c167cc6c",
+        }
+        for build, digest in builds.items():
+            with self.subTest(build=build), tempfile.TemporaryDirectory() as temporary:
+                identity = {**CURRENT_APPX_EXECUTABLE_IDENTITY, "sha256": digest}
+                executable = Path(temporary) / f"app-26.901.{build}.0" / "ChatGPT.exe"
+                executable.parent.mkdir()
+                executable.write_bytes(b"fixture")
+                adapter = select_adapter(
+                    executable, _identity_probe=lambda _path: identity
+                )
+                self.assertEqual(adapter["id"], f"chatgpt-electron-26-901-{build}-appx")
+                self.assertEqual(adapter["launchStrategy"]["kind"], "appx-activation-manager")
+                with self.assertRaisesRegex(RuntimeFailure, "sha256"):
+                    select_adapter(
+                        executable, _identity_probe=lambda _path: CURRENT_APPX_EXECUTABLE_IDENTITY,
+                    )
+
+    def test_runtime_compiles_modern_menu_guard_without_package_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            package = make_v2_package(Path(temporary))
+            before = {path: path.read_bytes() for path in package.rglob('*') if path.is_file()}
+            compiled = compile_skin(package)
+            self.assertIn('[data-app-shell-unified-tab-strip] > div:has(> [role="menubar"])', compiled['css'])
+            self.assertIn('var(--chromapaw-titlebar-surface, var(--chromapaw-surface-elevated))', compiled['css'])
+            self.assertEqual(before, {path: path.read_bytes() for path in before})
+
+    def test_appx_activation_cannot_adopt_preexisting_process(self) -> None:
+        import windows_runtime
+        executable = Path("C:/WindowsApps/OpenAI.Codex_26.901.2854.0_x64/app/ChatGPT.exe").resolve()
+        response = mock.Mock(returncode=0, stdout=json.dumps({"pid": 314}), stderr="")
+        with mock.patch.object(windows_runtime, "_windows_process_paths", return_value={314: executable}), \
+             mock.patch.object(windows_runtime, "_discover_appx_install_locations", return_value=[executable.parent.parent]), \
+             mock.patch.object(windows_runtime.subprocess, "run", return_value=response), \
+             mock.patch.object(windows_runtime, "_terminate_runtime_process") as terminate:
+            with self.assertRaisesRegex(RuntimeFailure, "reused an existing process"):
+                windows_runtime._launch_packaged_codex(executable, [], {
+                    "kind": "appx-activation-manager",
+                    "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App",
+                })
+            terminate.assert_not_called()
+
+    def test_adapter_registry_rejects_invalid_appx_application_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "adapters.json"
+            registry = json.loads(
+                (ROOT / "runtime" / "windows-adapters.json").read_text(encoding="utf-8")
+            )
+            registry["adapters"][-1]["launchStrategy"]["appUserModelId"] = "unsafe value"
+            path.write_text(json.dumps(registry), encoding="utf-8")
+            with self.assertRaises(RuntimeFailure) as context:
+                load_adapters(path)
+            self.assertIn("application user model id", str(context.exception))
 
     def test_enabled_adapter_requires_strong_identity_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

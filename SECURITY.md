@@ -51,6 +51,7 @@ The executable hash is a per-session continuity check, not a claim that every al
 - The relaunch preference contains package, executable, adapter, version, and hash identities only; it excludes session tokens, CDP ports, task titles, and conversation content.
 - Desktop and Start Menu integration is never implicit. It requires a separate acknowledgment, leaves the application-managed `.lnk` untouched, adds distinctly named ChromaPaw entries, and uses semantic ownership hashes so Windows tracking-data rewrites do not weaken verification.
 - The launcher starts only on shortcut invocation. ChromaPaw does not install a login task, registry auto-run entry, or always-on process watcher.
+- Ordinary-launch recovery is separate from the exact-version skin allowlist. After a Store update, it may activate only the registered `OpenAI.Codex_2p2nqsd0c76g0` Store package with the expected publisher, manifest application target, and a valid OpenAI-signed Codex executable. It never passes CDP arguments, injects CSS, terminates a process, or updates the skin's saved identities. The stable bootstrap embeds this recovery code; it never imports it from a generation that failed integrity verification.
 - CSS is injected in memory and removed by a session-owned marker.
 - A pre-activation `config.toml` backup is recorded when the file exists.
 - Codex may change `SKY_CUA_NATIVE_PIPE_DIRECTORY` while launching. ChromaPaw restores that allowlisted volatile key only if every nonvolatile line matches the backup; unrelated user edits are preserved.

@@ -46,7 +46,7 @@ python scripts/smoke_test_install.py --source . --ref= --json
 1. Push the candidate commit to GitHub.
 2. Create a new isolated `CODEX_HOME` outside a temporary-directory root that Codex refuses for helper binaries.
 3. Add the `chromapaw/codex-chromapaw` marketplace at the exact candidate branch or release tag and install `codex-chromapaw@chromapaw`.
-4. Confirm the smoke-test result reports the same manifest version as that selected marketplace snapshot and `codex plugin list` reports the plugin as installed and enabled.
+4. Confirm the smoke-test result reports the same manifest version as that selected marketplace snapshot, `contentMatchesSnapshot: true`, and a nonzero `verifiedFiles` count. The check must reject missing modules or stale content even when version strings match. Confirm `codex plugin list` reports the plugin as installed and enabled.
 5. Start a new Codex task and verify that natural-language pet and skin requests route to the expected skills.
 6. Install or explicitly point to a real compatible `hatch-pet` dependency before pet generation. The mock contract used by the repository smoke test proves dependency discovery only; it is not pet generation or visual-QA evidence.
 7. Generate and validate one pet and one skin from fresh references.

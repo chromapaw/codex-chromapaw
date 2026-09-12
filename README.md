@@ -8,7 +8,7 @@ Turn one uploaded image into an image-specific Codex skin or animated pet.
 [![License](https://img.shields.io/github/license/chromapaw/codex-chromapaw)](LICENSE)
 [![Project status: beta](https://img.shields.io/badge/status-beta-f59e0b)](ROADMAP.md)
 
-> Version 0.4.7 adds image-aware content-width decisions, safer runtime CSS handoff, Codex header contrast protection, and a complete open-source contribution and release surface. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
+> Version 0.4.8 adds reviewed next-launch skin activation, signed Store startup recovery, project-sidebar repair, and verified language synchronization. Installation checks compare package content as well as versions. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
 
 > [!IMPORTANT]
 > ChromaPaw is a community beta. Skin and pet package generation is portable, but live skin activation is not: Windows activation is experimental and exact-version gated, while macOS activation is not implemented.
@@ -57,7 +57,7 @@ For skins, the analysis becomes a SHA-256-bound `theme-profile.json` containing 
 | Skin relaunch after closing Codex | Explicit, reversible ChromaPaw Desktop and Start Menu shortcuts | Not implemented |
 | Compatibility discovery | Implemented | Read-only probe and enhanced cloud harness implemented |
 
-The registry currently enables only the separately reviewed standalone Codex `26.707.9981.0` adapter. Official AppX builds remain activation-disabled, and unknown versions fail closed. Run `python scripts/platform_capabilities.py --json` for the current machine instead of inferring support from the operating system alone.
+The registry currently enables the separately reviewed standalone Codex `26.707.9981.0` adapter and the exact official AppX `26.901.1978.0` adapter. The AppX adapter uses Windows' packaged-app activation manager instead of directly executing protected files. Other AppX builds and all unknown versions fail closed. Run `python scripts/platform_capabilities.py --json` for the current machine instead of inferring support from the operating system alone.
 
 ## Capabilities
 
@@ -87,11 +87,20 @@ The registry currently enables only the separately reviewed standalone Codex `26
 - `scripts/platform_capabilities.py --json` reports generation readiness, pet dependencies, and platform activation boundaries.
 - Skin uploads require Codex's image-generation capability when the upload is not a full environment or a salient subject overlaps the reading/input safe zone; safe full-environment uploads can proceed directly to deterministic packaging.
 - The Windows Runtime Beta validates an exact adapter, PE product metadata, signature policy, and a pinned executable identity before using a temporary loopback-only runtime without editing `WindowsApps`, `app.asar`, or signed application files.
+- If a Codex desktop upgrade leaves the new Projects sidebar empty while legacy saved workspaces still exist, `scripts/windows_profile_repair.py status` can diagnose the migration gap. The explicit `repair` operation creates a consistent backup and imports only saved project roots plus existing thread ids through Codex's own `project/import` protocol; it never copies authentication data or conversation text.
 - A successful Windows activation remembers only package/executable/adapter identities and hashes. It never stores the session token or debugging port as a relaunch preference.
 - Reviewed CSS-only updates use separate fail-closed paths: `refresh-active-css` for a healthy active session and `refresh-preference` for an inactive saved skin. Identity changes require a new activation review.
-- The optional Windows integration leaves `ChatGPT.lnk` untouched, hosts a verified content-addressed launcher/runtime copy outside the plugin cache, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
+- The optional Windows integration leaves any application-managed `ChatGPT.lnk` untouched, supports AppX installs that expose only a StartApps identity, hosts a verified content-addressed launcher/runtime copy outside the plugin cache, adds distinct `Codex ChromaPaw.lnk` entries to the Desktop and Start Menu, and removes only those managed entries while both semantic ownership hashes still match.
+- After a Store update removes a pinned Codex version, the repaired launcher can open the currently registered and signature-verified official app without a skin. This does not grant skin compatibility to an unknown version or silently replace the user's skin preference.
 - `scripts/audit_pets.py` reports valid v2, legacy v1, and invalid installed pets without changing any files.
 - The macOS probe reads bundle metadata and validates a package but cannot activate it. A separate enhanced GitHub Actions harness runs on Apple Silicon and Intel macOS runners, builds a real Skin Studio package, exercises pet installation/replacement/restore in a temporary Codex home, and captures simulated Codex renderer screenshots for the main window, right panel, and transparent pet overlay. It still does not test or claim activation in the signed, logged-in Codex app.
+
+For an affected Windows profile, first inspect and then explicitly repair it:
+
+```powershell
+python scripts/windows_profile_repair.py --json status
+python scripts/windows_profile_repair.py --json repair --acknowledge-repairs-project-sidebar
+```
 
 ## Install
 

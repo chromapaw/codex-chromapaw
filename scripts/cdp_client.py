@@ -254,8 +254,11 @@ class CdpEndpoint:
                 "userGesture": False,
             },
         }
-        with WebSocketConnection(target.websocket_url, self.timeout) as connection:
-            response = connection.send_json(payload, request_id)
+        try:
+            with WebSocketConnection(target.websocket_url, self.timeout) as connection:
+                response = connection.send_json(payload, request_id)
+        except OSError as exc:
+            raise CdpError(f"CDP websocket request failed: {exc}") from exc
         if "error" in response:
             raise CdpError(f"CDP Runtime.evaluate failed: {response['error']}")
         result = response.get("result")
@@ -273,8 +276,11 @@ class CdpEndpoint:
             "method": "Page.captureScreenshot",
             "params": {"format": "png", "fromSurface": True, "captureBeyondViewport": False},
         }
-        with WebSocketConnection(target.websocket_url, self.timeout) as connection:
-            response = connection.send_json(payload, request_id)
+        try:
+            with WebSocketConnection(target.websocket_url, self.timeout) as connection:
+                response = connection.send_json(payload, request_id)
+        except OSError as exc:
+            raise CdpError(f"CDP websocket request failed: {exc}") from exc
         if "error" in response:
             raise CdpError(f"CDP Page.captureScreenshot failed: {response['error']}")
         result = response.get("result")

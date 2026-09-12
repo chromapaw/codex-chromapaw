@@ -17,20 +17,24 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .windows_official_launcher import OfficialCodexLaunchError, probe_current_official_codex
     from .windows_runtime import (
         RuntimeFailure,
         atomic_json,
         build_preflight,
         runtime_data_dir,
+        select_adapter,
         sha256_file,
         utc_now,
     )
 except ImportError:
+    from windows_official_launcher import OfficialCodexLaunchError, probe_current_official_codex
     from windows_runtime import (  # type: ignore
         RuntimeFailure,
         atomic_json,
         build_preflight,
         runtime_data_dir,
+        select_adapter,
         sha256_file,
         utc_now,
     )
@@ -42,12 +46,15 @@ RECEIPT_FILE = "start-menu-shortcut.json"
 SHORTCUT_DESCRIPTION = "Launch Codex with the last validated ChromaPaw skin"
 HOSTED_RUNTIME_DIR = "shortcut-runtime"
 HOSTED_RUNTIME_SOURCES = (
+    ("scripts/windows_pending_activation.py", ROOT / "scripts" / "windows_pending_activation.py"),
+    ("scripts/windows_profile_repair.py", ROOT / "scripts" / "windows_profile_repair.py"),
     ("scripts/windows_skin_launcher.py", ROOT / "scripts" / "windows_skin_launcher.py"),
     ("scripts/windows_runtime.py", ROOT / "scripts" / "windows_runtime.py"),
     ("scripts/cdp_client.py", ROOT / "scripts" / "cdp_client.py"),
     ("scripts/skin_package.py", ROOT / "scripts" / "skin_package.py"),
     ("scripts/validate_skin_package.py", ROOT / "scripts" / "validate_skin_package.py"),
     ("scripts/theme_profile.py", ROOT / "scripts" / "theme_profile.py"),
+    ("scripts/windows_official_launcher.py", ROOT / "scripts" / "windows_official_launcher.py"),
 )
 HOSTED_BOOTSTRAP = '''#!/usr/bin/env python3
 """Stable entry point for the locally hosted ChromaPaw Windows runtime."""
@@ -61,6 +68,9 @@ import subprocess
 import sys
 import hashlib
 from pathlib import Path
+
+
+# CHROMAPAW_OFFICIAL_LAUNCHER
 
 
 def _fail(message: str) -> int:
@@ -83,7 +93,7 @@ def _explicit_data_dir_from_arguments() -> Path | None:
         return Path(explicit).expanduser().resolve() if explicit else None
 
 
-def _fallback_plain_codex(message: str) -> bool:
+def _fallback_saved_codex(message: str) -> bool:
     """Keep the shortcut useful without trusting a changed executable."""
     try:
         data_dir = _explicit_data_dir_from_arguments()
@@ -130,6 +140,32 @@ def _fallback_plain_codex(message: str) -> bool:
         return False
 
 
+def _fallback_plain_codex(message: str) -> bool:
+    if _fallback_saved_codex(message):
+        return True
+    try:
+        data_dir = _explicit_data_dir_from_arguments()
+        if data_dir is None:
+            return False
+        preference = json.loads((data_dir / "preferred-skin.json").read_text(encoding="utf-8"))
+        if not isinstance(preference, dict) or not isinstance(preference.get("executable"), str):
+            return False
+        official = launch_current_official_codex(official_config_locale())
+        try:
+            with (data_dir / "launcher.jsonl").open("a", encoding="utf-8", newline="\\n") as stream:
+                stream.write(json.dumps({
+                    "event": "bootstrap-fallback-current-official-codex",
+                    "error": message,
+                    "fallback": official,
+                    "guidance": "Codex opened without a skin; the saved skin needs compatibility review.",
+                }, ensure_ascii=False, separators=(",", ":")) + "\\n")
+        except OSError:
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     try:
@@ -137,15 +173,39 @@ def main() -> int:
         state = current
         data_dir = _explicit_data_dir_from_arguments()
         preference = None
+        pending = None
+        sidebar_pending = None
         if data_dir is not None:
             preference_path = data_dir / "preferred-skin.json"
             try:
                 preference = json.loads(preference_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError):
                 preference = None
-        if isinstance(preference, dict):
-            pinned_generation = preference.get("runtimeGeneration")
-            pinned_bundle_hash = preference.get("runtimeBundleHash")
+            pending_path = data_dir / "pending-skin-activation.json"
+            if pending_path.exists():
+                if pending_path.is_symlink():
+                    raise RuntimeError("pending activation cannot be a linked file")
+                pending = json.loads(pending_path.read_text(encoding="utf-8"))
+                if (not isinstance(pending, dict) or pending.get("schemaVersion") != 1
+                        or pending.get("operation") != "activate" or pending.get("acknowledged") is not True):
+                    raise RuntimeError("pending activation metadata is invalid")
+            sidebar_path = data_dir / "pending-sidebar-profile-repair.json"
+            if sidebar_path.exists():
+                if sidebar_path.is_symlink():
+                    raise RuntimeError("pending sidebar repair cannot be a linked file")
+                sidebar_pending = json.loads(sidebar_path.read_text(encoding="utf-8"))
+                if (not isinstance(sidebar_pending, dict) or sidebar_pending.get("schemaVersion") != 1
+                        or sidebar_pending.get("operation") != "repair-sidebar"
+                        or sidebar_pending.get("acknowledged") is not True):
+                    raise RuntimeError("pending sidebar repair metadata is invalid")
+        # A reviewed fresh activation takes precedence over an obsolete saved skin.
+        # All bundle files are verified below; the launcher rechecks every target identity.
+        selected = pending if pending is not None else (
+            sidebar_pending if sidebar_pending is not None else preference
+        )
+        if isinstance(selected, dict):
+            pinned_generation = selected.get("runtimeGeneration")
+            pinned_bundle_hash = selected.get("runtimeBundleHash")
             if (
                 isinstance(pinned_generation, str)
                 and isinstance(pinned_bundle_hash, str)
@@ -156,6 +216,8 @@ def main() -> int:
                     "generation": pinned_generation,
                     "bundleHash": pinned_bundle_hash,
                 }
+            elif pending is not None or sidebar_pending is not None:
+                raise RuntimeError("pending operation hosted generation is invalid")
         if not isinstance(state, dict) or state.get("schemaVersion") != 1:
             raise RuntimeError("hosted runtime current pointer is invalid")
         generation_name = state.get("generation")
@@ -244,7 +306,10 @@ def main() -> int:
         os.environ["CHROMAPAW_HOSTED_GENERATION"] = generation_name
         os.environ["CHROMAPAW_HOSTED_BUNDLE_HASH"] = str(manifest["bundleHash"])
         sys.path.insert(0, str(launcher.parent))
-        sys.argv = [str(launcher), "--adapters", str(adapters), *sys.argv[1:]]
+        quiet_recovery = []
+        if pending is None and sidebar_pending is None and isinstance(preference, dict) and not Path(str(preference.get("executable", ""))).is_file():
+            quiet_recovery = ["--no-error-dialog"]
+        sys.argv = [str(launcher), "--adapters", str(adapters), *quiet_recovery, *sys.argv[1:]]
         runpy.run_path(str(launcher), run_name="__main__")
         return 0
     except SystemExit as exc:
@@ -252,7 +317,8 @@ def main() -> int:
             code = int(exc.code or 0)
         except (TypeError, ValueError):
             code = 1
-        if code == 0 or not _fallback_plain_codex(f"hosted launcher exited with code {code}"):
+        # Code 2 means the user declined a restart, not a launch failure.
+        if code in (0, 2) or not _fallback_plain_codex(f"hosted launcher exited with code {code}"):
             return code
         return 0
     except Exception as exc:
@@ -264,6 +330,10 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
+HOSTED_BOOTSTRAP = HOSTED_BOOTSTRAP.replace(
+    "# CHROMAPAW_OFFICIAL_LAUNCHER",
+    (ROOT / "scripts" / "windows_official_launcher.py").read_text(encoding="utf-8"),
+)
 
 
 def _programs_dir() -> Path:
@@ -778,12 +848,26 @@ def install_shortcut(
     if not executable.is_file() or not LAUNCHER.is_file() or not adapters.is_file():
         raise RuntimeFailure("launcher, adapter registry, and selected Codex executable must exist")
 
-    original = inspect_shortcut(original_shortcut)
-    if shortcut_semantics(original)["target"] != _normalize_path(str(executable)):
+    selected_adapter = select_adapter(executable, adapters)
+    launch_strategy = selected_adapter.get("launchStrategy", {"kind": "direct"})
+    is_packaged_app = launch_strategy.get("kind") == "appx-activation-manager"
+    original_observed = "present" if original_shortcut.is_file() else "absent"
+    original_semantic_hash: str | None = None
+    if original_observed == "present":
+        original = inspect_shortcut(original_shortcut)
+        if (
+            not is_packaged_app
+            and shortcut_semantics(original)["target"]
+            != _normalize_path(str(executable))
+        ):
+            raise RuntimeFailure(
+                "the existing ChatGPT shortcut does not target the selected Codex executable"
+            )
+        original_semantic_hash = shortcut_semantic_hash(original)
+    elif not is_packaged_app:
         raise RuntimeFailure(
-            "the existing ChatGPT shortcut does not target the selected Codex executable"
+            "the original ChatGPT shortcut is missing for the selected standalone Codex executable"
         )
-    original_semantic_hash = shortcut_semantic_hash(original)
 
     receipt = _load_receipt(data_dir)
     if receipt is not None and receipt.get("schemaVersion") == 1:
@@ -887,10 +971,14 @@ def install_shortcut(
             "shortcuts": installed_entries,
             "originalShortcut": str(original_shortcut),
             "originalShortcutSemanticHash": original_semantic_hash,
+            "originalShortcutObservedAtInstall": original_observed,
+            "originalShortcutTargetRequired": not is_packaged_app,
             "target": str(pythonw),
             "arguments": arguments,
             "selectedExecutable": str(executable),
             "selectedExecutableHash": sha256_file(executable),
+            "selectedAdapterId": selected_adapter["id"],
+            "launchStrategy": launch_strategy,
             "launcher": str(hosted_bootstrap),
             "launcherHash": sha256_file(hosted_bootstrap),
             "adapterFile": str(Path(hosted_runtime["generationDir"]) / "runtime" / "windows-adapters.json"),
@@ -909,6 +997,60 @@ def install_shortcut(
         raise
     assert result is not None
     return result
+
+
+def repair_shortcut_launcher(
+    data_dir: Path, adapters: Path, *, acknowledged: bool,
+) -> dict[str, Any]:
+    """Repair ordinary startup without adopting a new skin/executable identity."""
+    if not acknowledged:
+        raise RuntimeFailure("launcher repair requires --acknowledge-repairs-windows-launcher")
+    if os.name != "nt":
+        raise RuntimeFailure("Windows launcher repair is Windows-only")
+    data_dir = data_dir.expanduser().resolve()
+    receipt = _load_receipt(data_dir)
+    if not receipt or receipt.get("schemaVersion") != 4 or receipt.get("mode") != "add":
+        raise RuntimeFailure("launcher repair requires an existing managed hosted shortcut receipt")
+    if not shortcut_status(data_dir)["ok"]:
+        raise RuntimeFailure("managed shortcut or hosted runtime ownership changed; refusing repair")
+    try:
+        official = probe_current_official_codex()
+    except OfficialCodexLaunchError as exc:
+        raise RuntimeFailure(str(exc)) from exc
+    hosted_root = data_dir / HOSTED_RUNTIME_DIR
+    paths = (hosted_root / "bootstrap.py", hosted_root / "current.json", data_dir / RECEIPT_FILE)
+    snapshots = {path: path.read_bytes() if path.is_file() else None for path in paths}
+    preference = data_dir / "preferred-skin.json"
+    preference_before = preference.read_bytes() if preference.is_file() else None
+    try:
+        hosted = _install_hosted_runtime(data_dir, adapters.expanduser().resolve())
+        repaired = {
+            **receipt,
+            "launcherRepairedAt": utc_now(),
+            "launcher": hosted["bootstrap"],
+            "launcherHash": hosted["bootstrapHash"],
+            "adapterFile": str(Path(hosted["generationDir"]) / "runtime" / "windows-adapters.json"),
+            "adapterFileHash": sha256_file(adapters),
+            "hostedRuntime": hosted,
+            "plainOfficialFallback": official,
+        }
+        atomic_json(data_dir / RECEIPT_FILE, repaired)
+        after = shortcut_status(data_dir)
+        if not after["ok"]:
+            raise RuntimeFailure("repaired launcher failed ownership verification")
+        preference_after = preference.read_bytes() if preference.is_file() else None
+        if preference_after != preference_before:
+            raise RuntimeFailure("saved skin changed concurrently; launcher repair was rolled back")
+        return {
+            "ok": True, "status": "launcher-repaired", "skinPreferenceChanged": False,
+            "shortcutsChanged": False, "skinActivated": False,
+            "officialCodex": official, "verification": after,
+        }
+    except Exception:
+        for path, content in snapshots.items():
+            _restore_optional_bytes(path, content)
+        # Never overwrite a concurrent preference update.
+        raise
 
 
 def restore_shortcut(data_dir: Path) -> dict[str, Any]:
@@ -1004,9 +1146,16 @@ def shortcut_status(data_dir: Path) -> dict[str, Any]:
     shortcut_matches = bool(shortcut_results) and all(
         entry["semanticMatches"] for entry in shortcut_results
     )
-    original_matches = original.is_file() and shortcut_semantic_hash(
-        inspect_shortcut(original)
-    ) == receipt.get("originalShortcutSemanticHash")
+    original_observed = receipt.get("originalShortcutObservedAtInstall")
+    original_unmanaged = original_observed == "absent"
+    if original_unmanaged:
+        # Packaged Codex installs may expose only a StartApps identity and no
+        # filesystem .lnk. ChromaPaw neither creates nor owns that entry.
+        original_matches = True
+    else:
+        original_matches = original.is_file() and shortcut_semantic_hash(
+            inspect_shortcut(original)
+        ) == receipt.get("originalShortcutSemanticHash")
     hosted_status = (
         _hosted_runtime_status(receipt)
         if receipt.get("schemaVersion") == 4
@@ -1018,6 +1167,8 @@ def shortcut_status(data_dir: Path) -> dict[str, Any]:
         "status": "installed" if everything_matches else "drifted",
         "shortcuts": shortcut_results,
         "originalShortcut": str(original),
+        "originalShortcutPresent": original.is_file(),
+        "originalShortcutUnmanaged": original_unmanaged,
         "allShortcutSemanticsMatch": shortcut_matches,
         "originalShortcutSemanticMatches": original_matches,
         "hostedRuntime": hosted_status,
@@ -1057,6 +1208,9 @@ def main() -> int:
     )
     subparsers.add_parser("restore")
     subparsers.add_parser("status")
+    repair = subparsers.add_parser("repair-launcher")
+    repair.add_argument("--adapters", type=Path, default=ROOT / "runtime" / "windows-adapters.json")
+    repair.add_argument("--acknowledge-repairs-windows-launcher", action="store_true")
 
     args = parser.parse_args()
     data_dir = runtime_data_dir(args.data_dir)
@@ -1074,6 +1228,11 @@ def main() -> int:
             )
         elif args.command == "restore":
             result = restore_shortcut(data_dir)
+        elif args.command == "repair-launcher":
+            result = repair_shortcut_launcher(
+                data_dir, args.adapters,
+                acknowledged=args.acknowledge_repairs_windows_launcher,
+            )
         else:
             result = shortcut_status(data_dir)
     except (OSError, RuntimeFailure, ValueError) as exc:

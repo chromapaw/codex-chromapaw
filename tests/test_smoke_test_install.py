@@ -17,6 +17,7 @@ from smoke_test_install import (  # noqa: E402
     installed_plugin_from_result,
     marketplace_plugin_root,
     stage_local_marketplace,
+    verify_installed_content,
 )
 
 
@@ -40,6 +41,60 @@ class SmokeTestInstallTests(unittest.TestCase):
             self.assertFalse((staged / ".git").exists())
             self.assertFalse((staged / "work").exists())
             self.assertFalse((staged / "outputs").exists())
+            self.assertFalse((staged / "node_modules").exists())
+            self.assertFalse((staged / "artifacts").exists())
+            self.assertGreater(verify_installed_content(ROOT, staged), 0)
+
+    def test_content_check_rejects_stale_code_with_the_same_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            installed = Path(temporary) / "installed"
+            for root in (source, installed):
+                (root / ".codex-plugin").mkdir(parents=True)
+                (root / ".codex-plugin" / "plugin.json").write_text(
+                    json.dumps({"name": PLUGIN_NAME, "version": "0.4.8"}), encoding="utf-8"
+                )
+                (root / "runtime.py").write_text("new code", encoding="utf-8")
+            self.assertEqual(verify_installed_content(source, installed), 2)
+            (installed / "runtime.py").write_text("old code", encoding="utf-8")
+            with self.assertRaisesRegex(SmokeTestError, r"changed=\['runtime.py'\]"):
+                verify_installed_content(source, installed)
+
+    def test_content_check_reports_missing_and_unexpected_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            installed = Path(temporary) / "installed"
+            source.mkdir()
+            installed.mkdir()
+            (source / "recovery.py").write_text("required", encoding="utf-8")
+            (installed / "obsolete.py").write_text("stale", encoding="utf-8")
+            with self.assertRaisesRegex(
+                SmokeTestError, r"missing=\['recovery.py'\], unexpected=\['obsolete.py'\]"
+            ):
+                verify_installed_content(source, installed)
+
+    def test_staging_excludes_local_dependencies_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            (source / ".codex-plugin").mkdir(parents=True)
+            (source / ".codex-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            (source / ".agents" / "plugins").mkdir(parents=True)
+            (source / ".agents" / "plugins" / "marketplace.json").write_text("{}", encoding="utf-8")
+            for directory in ("node_modules", "artifacts", ".pytest_cache"):
+                (source / directory).mkdir()
+                (source / directory / "private.txt").write_text("local only", encoding="utf-8")
+            staged = stage_local_marketplace(source, Path(temporary) / "staged")
+            for directory in ("node_modules", "artifacts", ".pytest_cache"):
+                self.assertFalse((staged / directory).exists())
+            self.assertEqual(verify_installed_content(source, staged), 2)
+
+    def test_staging_refuses_recursive_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            (source / ".codex-plugin").mkdir()
+            (source / ".codex-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(SmokeTestError, "outside the distributable source"):
+                stage_local_marketplace(source, source / "nested")
 
     def test_install_result_rejects_a_version_from_another_ref(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
