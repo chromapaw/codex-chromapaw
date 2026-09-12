@@ -1,6 +1,6 @@
-# ChromaPaw 0.4.8 candidate
+# ChromaPaw 0.4.8 release validation
 
-Prepared on 2026-09-12. Public release is pending; this document records local validation, not a completed GitHub release.
+Prepared on 2026-09-12. This document records local validation and the public-release gates. The GitHub Release and its linked workflow are the source of truth for publication status.
 
 ## Changes
 
@@ -8,6 +8,7 @@ Prepared on 2026-09-12. Public release is pending; this document records local v
 - Update the plugin manifest, current-version documentation, roadmap and management skill together. Use one fresh `+codex.<timestamp>` suffix to avoid reusing a stale plugin cache.
 - Compare installed files with the selected marketplace snapshot using SHA-256, including new recovery modules. Missing, unexpected or changed distributable files fail installation verification even when version strings match.
 - Exclude local dependencies, Python caches, build output, logs and private artifacts from local marketplace staging.
+- Resolve temporary-path aliases in recovery tests so Windows short paths and macOS `/var` symlinks do not cause false identity mismatches.
 
 ## Local validation
 

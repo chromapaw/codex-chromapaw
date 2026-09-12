@@ -15,7 +15,7 @@ class PendingActivationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.data = self.root / "data"
         self.data.mkdir()
         self.package = self.root / "skin"

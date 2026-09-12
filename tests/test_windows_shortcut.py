@@ -135,7 +135,7 @@ class WindowsShortcutTests(unittest.TestCase):
             snapshots = {path: path.read_bytes() for path in tracked}
             original_atomic = windows_shortcut.atomic_json
             def fail_repair_receipt(path, value):
-                if path == data_dir / "start-menu-shortcut.json":
+                if path.resolve() == (data_dir / "start-menu-shortcut.json").resolve():
                     raise RuntimeFailure("fixture repair receipt failure")
                 return original_atomic(path, value)
             with mock.patch("windows_shortcut.probe_current_official_codex", return_value={

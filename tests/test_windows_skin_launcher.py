@@ -223,7 +223,7 @@ class WindowsSkinLauncherTests(unittest.TestCase):
                 "windows_skin_launcher._read_preference", return_value=preference
             ), mock.patch(
                 "windows_skin_launcher.sha256_file",
-                side_effect=lambda path: "b" * 64 if Path(path) == adapter_file else "a" * 64,
+                side_effect=lambda path: "b" * 64 if Path(path).resolve() == adapter_file.resolve() else "a" * 64,
             ), mock.patch(
                 "windows_skin_launcher.codex_locale_status",
                 return_value={"requested": "zh-CN", "valid": True},

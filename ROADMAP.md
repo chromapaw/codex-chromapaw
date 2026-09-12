@@ -75,7 +75,7 @@
 - Add complete community, support, issue, ownership, dependency, security, and release automation surfaces.
 - Pin GitHub Actions to reviewed commits and publish archives, checksums, and an SPDX SBOM from validated tags.
 
-## 0.4.8 — Store recovery and next-launch updates (release candidate)
+## 0.4.8 — Store recovery and next-launch updates
 
 - Support exact signed Store adapters after isolated lifecycle verification.
 - Persist reviewed skin activation and sidebar repair for the next managed launch.
