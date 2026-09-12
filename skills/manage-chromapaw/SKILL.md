@@ -18,6 +18,7 @@ Read [references/safety-model.md](references/safety-model.md) completely before 
 - **Preview:** display package previews without activating the skin.
 - **Activate skin:** use the Windows Runtime Beta only after the exact-version gates and explicit acknowledgment below pass.
 - **Resume skin:** relaunch the last successfully activated Windows skin only after all saved package, executable, version, CSS, and adapter identities still match.
+- **Recover after a Store update or prepare a next-launch operation:** read [references/windows-recovery.md](references/windows-recovery.md). Use it for removed executable paths, reviewed pending activation, or a missing project-sidebar index; installing a plugin update alone does not authorize these operations.
 - **Install persistent entries:** after separate consent, confirm the original Start Menu target and add distinctly named, semantic-ownership-hashed ChromaPaw Desktop and Start Menu launchers without modifying the original entry.
 - **Probe macOS:** use `scripts/macos_compat.py` only to collect read-only app metadata and package compatibility. There is no macOS activation command yet.
 - **Install or restore pet:** use `scripts/install_pet.py` or `scripts/restore_pet.py` with `--select`; replacement must remain explicit and backup-backed. Report both pet and config backups, selected avatar id, and whether reopening Codex may be required.
@@ -52,7 +53,7 @@ Stop when:
 
 ### 2. Prepare activation
 
-Ask the user to close every window belonging to the selected executable. Do not terminate their existing Codex process automatically.
+For immediate activation, ask the user to close every window belonging to the selected executable. When the request comes from an open Codex window and the user wants to keep working, use the reviewed next-launch flow in [references/windows-recovery.md](references/windows-recovery.md). Do not terminate their existing Codex process automatically.
 
 Explain that activation will:
 
@@ -152,4 +153,4 @@ After restore, the user may launch Codex normally without the debugging argument
 
 ## Current compatibility
 
-The `0.4.x` runtime enables Windows activation and resume only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json` after PE metadata, signature policy, and pinned executable identity pass. The locally discovered official AppX build remains disabled because protected package execution rejected the required isolated runtime launch. The separate persistent shortcuts are Windows-only. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.
+The `0.4.x` runtime enables Windows activation and resume only for exact entries marked `activationEnabled: true` in `runtime/windows-adapters.json` after PE metadata, signature policy, and pinned executable identity pass. Reviewed signed Store adapters use Windows' packaged-app activation manager; the historical failed direct-AppX record remains disabled. Resolve the installed build again after every Store update: an enabled record for an older build does not authorize a new one. The separate persistent shortcuts are Windows-only. On macOS, `scripts/macos_compat.py` is probe-only and cannot activate a skin. Discovery does not imply activation support.

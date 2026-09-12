@@ -1,6 +1,6 @@
 # macOS compatibility probe
 
-ChromaPaw 0.4.7 has platform-neutral code paths for portable pet and contrast-safe, image-aware skin assets. Pet generation additionally requires a compatible external `hatch-pet` workflow, and both generation paths still require real-Mac acceptance testing. The separate persistent launchers are Windows-only; live macOS skin activation is not implemented or claimed.
+ChromaPaw 0.4.8 has platform-neutral code paths for portable pet and contrast-safe, image-aware skin assets. Pet generation additionally requires a compatible external `hatch-pet` workflow, and both generation paths still require real-Mac acceptance testing. The separate persistent launchers are Windows-only; live macOS skin activation is not implemented or claimed.
 
 ## Enhanced cloud harness
 

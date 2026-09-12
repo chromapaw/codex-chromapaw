@@ -50,6 +50,84 @@
       "allowedTargetSchemes": ["app"],
       "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
       "testedTarget": "Official AppX discovered on 2026-08-10; protected-package direct launch rejected with WinError 5, so activation remains disabled"
+    },
+    {
+      "id": "chatgpt-electron-26-901-1978-appx",
+      "appVersion": "26.901.1978.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": true,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "fileVersion": "152.0.7977.64",
+        "allowedSha256": ["a7b0a4f38508d69a85ea51af9f6bd6a42c24a3904159ddff4d4d181eaadfff1c"],
+        "signature": {
+          "allowedStatuses": ["Valid"],
+          "signerSubjectContains": "OpenAI OpCo, LLC"
+        }
+      },
+      "launchStrategy": {
+        "kind": "appx-activation-manager",
+        "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App"
+      },
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Official AppX activation with isolated profile, loopback CDP, and zh-CN renderer verification passed on 2026-09-04"
+    },
+    {
+      "id": "chatgpt-electron-26-901-2854-appx",
+      "appVersion": "26.901.2854.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": true,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "fileVersion": "152.0.7977.64",
+        "allowedSha256": ["59569ff256d3e93ec5ec30505201cf11156b15c6c24130d66ff24105e4161fcf"],
+        "signature": {
+          "allowedStatuses": ["Valid"],
+          "signerSubjectContains": "OpenAI OpCo, LLC"
+        }
+      },
+      "launchStrategy": {
+        "kind": "appx-activation-manager",
+        "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App"
+      },
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Official AppX isolated profile, zh-CN main/avatar CSS hashes, menu contrast screenshots, transparent avatar, CSS repair and owned-process cleanup passed on 2026-09-04"
+    },
+    {
+      "id": "chatgpt-electron-26-901-5003-appx",
+      "appVersion": "26.901.5003.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": true,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "fileVersion": "152.0.7977.64",
+        "allowedSha256": ["39e59e44d3f3aa4f6b7813d61b018ec0389ff28b6671f3d20bf258f2c167cc6c"],
+        "signature": {
+          "allowedStatuses": ["Valid"],
+          "signerSubjectContains": "OpenAI OpCo, LLC"
+        }
+      },
+      "launchStrategy": {
+        "kind": "appx-activation-manager",
+        "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App"
+      },
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Official signed Store build: isolated main/avatar CSS, zh-CN, menu contrast and project-list screenshots, transparent pet, CSS removal/repair and owned-process cleanup passed on 2026-09-06"
     }
   ]
 }

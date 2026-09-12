@@ -20,6 +20,7 @@ from windows_shortcut import (  # noqa: E402
     _write_shortcut,
     inspect_shortcut,
     install_shortcut,
+    repair_shortcut_launcher,
     restore_shortcut,
     shortcut_semantic_hash,
     shortcut_status,
@@ -28,6 +29,146 @@ from windows_shortcut import (  # noqa: E402
 
 @unittest.skipUnless(os.name == "nt", "Windows shortcut integration test")
 class WindowsShortcutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.adapter_patch = mock.patch(
+            "windows_shortcut.select_adapter",
+            return_value={"id": "fixture-direct", "launchStrategy": {"kind": "direct"}},
+        )
+        self.adapter_patch.start()
+        self.addCleanup(self.adapter_patch.stop)
+
+    def test_pending_activation_bootstrap_overrides_removed_old_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "state"
+            executable = root / "ChatGPT.exe"
+            executable.write_bytes(b"fixture")
+            original = root / "ChatGPT.lnk"
+            _write_shortcut(original, target=executable, arguments="", working_directory=root,
+                            icon=executable, description="ChatGPT")
+            installed = install_shortcut(data_dir, root / "ChromaPaw.lnk", executable,
+                ROOT / "runtime/windows-adapters.json", acknowledged=True,
+                original_shortcut=original, desktop_shortcut=root / "Desktop/ChromaPaw.lnk")
+            hosted = installed["hostedRuntime"]
+            preference = data_dir / "preferred-skin.json"
+            preference.write_text(json.dumps({"schemaVersion": 1, "executable": "removed.exe",
+                "runtimeGeneration": "sha256-" + "a" * 64, "runtimeBundleHash": "a" * 64}), encoding="utf-8")
+            before = preference.read_bytes()
+            request = data_dir / "pending-skin-activation.json"
+            request.write_text(json.dumps({"schemaVersion": 1, "operation": "activate", "acknowledged": True,
+                "runtimeGeneration": hosted["generation"], "runtimeBundleHash": hosted["bundleHash"]}), encoding="utf-8")
+            namespace = {"__name__": "bootstrap_test", "__file__": hosted["bootstrap"]}
+            exec(compile(Path(hosted["bootstrap"]).read_text(encoding="utf-8"), "bootstrap.py", "exec"), namespace)
+            captured = []
+            with mock.patch.object(sys, "argv", [hosted["bootstrap"], "--data-dir", str(data_dir)]), mock.patch.dict(
+                os.environ
+            ), mock.patch("runpy.run_path", side_effect=lambda *a, **k: captured.extend(sys.argv)):
+                self.assertEqual(namespace["main"](), 0)
+            self.assertEqual(Path(captured[0]), Path(hosted["generationDir"]) / "scripts/windows_skin_launcher.py")
+            self.assertNotIn("--no-error-dialog", captured)
+            self.assertEqual(preference.read_bytes(), before)
+            self.assertTrue(request.exists())
+
+    def test_pending_sidebar_repair_uses_its_reviewed_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "state"
+            executable = root / "ChatGPT.exe"
+            executable.write_bytes(b"fixture")
+            original = root / "ChatGPT.lnk"
+            _write_shortcut(original, target=executable, arguments="", working_directory=root,
+                            icon=executable, description="ChatGPT")
+            installed = install_shortcut(data_dir, root / "ChromaPaw.lnk", executable,
+                ROOT / "runtime/windows-adapters.json", acknowledged=True,
+                original_shortcut=original, desktop_shortcut=root / "Desktop/ChromaPaw.lnk")
+            hosted = installed["hostedRuntime"]
+            (data_dir / "preferred-skin.json").write_text(json.dumps({"schemaVersion": 1,
+                "runtimeGeneration": "sha256-" + "a" * 64, "runtimeBundleHash": "a" * 64}), encoding="utf-8")
+            (data_dir / "pending-sidebar-profile-repair.json").write_text(json.dumps({
+                "schemaVersion": 1, "operation": "repair-sidebar", "acknowledged": True,
+                "runtimeGeneration": hosted["generation"], "runtimeBundleHash": hosted["bundleHash"]}), encoding="utf-8")
+            namespace = {"__name__": "bootstrap_test", "__file__": hosted["bootstrap"]}
+            exec(compile(Path(hosted["bootstrap"]).read_text(encoding="utf-8"), "bootstrap.py", "exec"), namespace)
+            captured = []
+            with mock.patch.object(sys, "argv", [hosted["bootstrap"], "--data-dir", str(data_dir)]), mock.patch.dict(
+                os.environ
+            ), mock.patch("runpy.run_path", side_effect=lambda *a, **k: captured.extend(sys.argv)):
+                self.assertEqual(namespace["main"](), 0)
+            self.assertEqual(Path(captured[0]), Path(hosted["generationDir"]) / "scripts/windows_skin_launcher.py")
+
+    def test_repair_launcher_keeps_deleted_executable_skin_pin_and_shortcuts_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            executable = root / "ChatGPT.exe"
+            executable.write_bytes(b"fixture executable")
+            original = root / "ChatGPT.lnk"
+            _write_shortcut(original, target=executable, arguments="", working_directory=root,
+                            icon=executable, description="ChatGPT")
+            installed = install_shortcut(
+                data_dir, root / "Codex ChromaPaw.lnk", executable,
+                ROOT / "runtime" / "windows-adapters.json", acknowledged=True,
+                original_shortcut=original, desktop_shortcut=root / "Desktop" / "Codex ChromaPaw.lnk",
+            )
+            preference = data_dir / "preferred-skin.json"
+            preference.write_text(json.dumps({"schemaVersion": 1, "executable": str(executable),
+                "runtimeGeneration": installed["hostedRuntime"]["generation"],
+                "runtimeBundleHash": installed["hostedRuntime"]["bundleHash"]}), encoding="utf-8")
+            before = preference.read_bytes()
+            executable.unlink()
+            with self.assertRaisesRegex(RuntimeFailure, "requires --acknowledge"):
+                repair_shortcut_launcher(data_dir, ROOT / "runtime" / "windows-adapters.json", acknowledged=False)
+            with mock.patch("windows_shortcut.probe_current_official_codex", return_value={
+                "executable": "current-official.exe", "skinApplied": False, "launched": False,
+            }), mock.patch("windows_shortcut.build_preflight") as preflight:
+                result = repair_shortcut_launcher(data_dir, ROOT / "runtime" / "windows-adapters.json", acknowledged=True)
+            preflight.assert_not_called()
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["skinActivated"])
+            self.assertEqual(preference.read_bytes(), before)
+            self.assertEqual(result["verification"]["status"], "installed")
+
+            import windows_shortcut
+            tracked = [Path(installed["hostedRuntime"]["bootstrap"]),
+                       Path(installed["hostedRuntime"]["current"]),
+                       data_dir / "start-menu-shortcut.json"]
+            snapshots = {path: path.read_bytes() for path in tracked}
+            original_atomic = windows_shortcut.atomic_json
+            def fail_repair_receipt(path, value):
+                if path.resolve() == (data_dir / "start-menu-shortcut.json").resolve():
+                    raise RuntimeFailure("fixture repair receipt failure")
+                return original_atomic(path, value)
+            with mock.patch("windows_shortcut.probe_current_official_codex", return_value={
+                "executable": "current-official.exe", "skinApplied": False,
+            }), mock.patch("windows_shortcut.HOSTED_BOOTSTRAP", windows_shortcut.HOSTED_BOOTSTRAP + "\n# next bootstrap\n"), mock.patch(
+                "windows_shortcut.atomic_json", side_effect=fail_repair_receipt
+            ):
+                with self.assertRaisesRegex(RuntimeFailure, "fixture repair receipt failure"):
+                    repair_shortcut_launcher(data_dir, ROOT / "runtime" / "windows-adapters.json", acknowledged=True)
+            self.assertEqual({path: path.read_bytes() for path in tracked}, snapshots)
+            self.assertEqual(preference.read_bytes(), before)
+
+            # Simulate an older, pinned launcher failing after an AppX update.
+            # The new stable bootstrap must recover without executing that skin
+            # on an unknown app version or raising the old blocking error box.
+            namespace = {"__name__": "bootstrap_test", "__file__": installed["hostedRuntime"]["bootstrap"]}
+            exec(compile(Path(namespace["__file__"]).read_text(encoding="utf-8"), "bootstrap.py", "exec"), namespace)
+            launch = mock.Mock(return_value={"launched": True, "skinApplied": False, "pid": 456})
+            namespace["launch_current_official_codex"] = launch
+            namespace["official_config_locale"] = lambda: "zh-CN"
+            captured = []
+            def old_launcher_failure(*args, **kwargs):
+                captured.extend(sys.argv)
+                raise SystemExit(1)
+            with mock.patch.object(sys, "argv", [namespace["__file__"], "--data-dir", str(data_dir)]), mock.patch.dict(
+                os.environ
+            ), mock.patch("runpy.run_path", side_effect=old_launcher_failure):
+                self.assertEqual(namespace["main"](), 0)
+            self.assertIn("--no-error-dialog", captured)
+            launch.assert_called_once_with("zh-CN")
+            self.assertEqual(preference.read_bytes(), before)
+
+
     def test_hosted_generation_publish_retries_transient_windows_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -167,6 +308,80 @@ class WindowsShortcutTests(unittest.TestCase):
             self.assertTrue(Path(hosted["root"]).is_dir())
             self.assertEqual(restored["hostedRuntimeRetained"], hosted["root"])
             self.assertEqual(shortcut_status(data_dir)["status"], "not-installed")
+
+    def test_appx_install_allows_absent_original_shortcut(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_dir = root / "runtime-state"
+            executable = root / "WindowsApps" / "OpenAI.Codex" / "app" / "ChatGPT.exe"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"fixture executable")
+            original_shortcut = root / "ChatGPT.lnk"
+            shortcut = root / "Codex ChromaPaw.lnk"
+            desktop_shortcut = root / "Desktop" / "Codex ChromaPaw.lnk"
+            strategy = {
+                "kind": "appx-activation-manager",
+                "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App",
+            }
+
+            with mock.patch(
+                "windows_shortcut.select_adapter",
+                return_value={"id": "fixture-appx", "launchStrategy": strategy},
+            ):
+                installed = install_shortcut(
+                    data_dir,
+                    shortcut,
+                    executable,
+                    ROOT / "runtime" / "windows-adapters.json",
+                    acknowledged=True,
+                    original_shortcut=original_shortcut,
+                    desktop_shortcut=desktop_shortcut,
+                )
+
+            self.assertEqual(installed["originalShortcutObservedAtInstall"], "absent")
+            self.assertFalse(installed["originalShortcutTargetRequired"])
+            self.assertIsNone(installed["originalShortcutSemanticHash"])
+            self.assertEqual(installed["selectedAdapterId"], "fixture-appx")
+            status = shortcut_status(data_dir)
+            self.assertEqual(status["status"], "installed")
+            self.assertTrue(status["originalShortcutUnmanaged"])
+            self.assertFalse(status["originalShortcutPresent"])
+
+            # A later application-owned shortcut does not become ChromaPaw's
+            # responsibility and cannot invalidate its two managed entries.
+            _write_shortcut(
+                original_shortcut,
+                target=executable,
+                arguments="--application-owned",
+                working_directory=executable.parent,
+                icon=executable,
+                description="Codex",
+            )
+            status = shortcut_status(data_dir)
+            self.assertEqual(status["status"], "installed")
+            self.assertTrue(status["originalShortcutUnmanaged"])
+            self.assertTrue(status["originalShortcutPresent"])
+
+            restored = restore_shortcut(data_dir)
+            self.assertEqual(restored["status"], "removed")
+            self.assertTrue(original_shortcut.is_file())
+
+    def test_standalone_install_rejects_absent_original_shortcut(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "app-26.707.9981.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture executable")
+            with self.assertRaisesRegex(RuntimeFailure, "original ChatGPT shortcut is missing"):
+                install_shortcut(
+                    root / "runtime-state",
+                    root / "Codex ChromaPaw.lnk",
+                    executable,
+                    ROOT / "runtime" / "windows-adapters.json",
+                    acknowledged=True,
+                    original_shortcut=root / "ChatGPT.lnk",
+                    desktop_shortcut=root / "Desktop" / "Codex ChromaPaw.lnk",
+                )
 
     def test_hosted_launcher_failure_falls_back_without_dialog(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

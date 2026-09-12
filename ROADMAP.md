@@ -66,7 +66,7 @@
 - Make Windows status and CSS updates continuity-aware and compensating on failure.
 - Validate schemas, external workflow contracts, and isolated installation in the release gate.
 
-## 0.4.7 — Adaptive layout and open-source readiness (release candidate)
+## 0.4.7 — Adaptive layout and open-source readiness ✅
 
 - Decide conversation width from subject role and display priority instead of subject position alone.
 - Keep supporting scenery at the default Codex width and reserve space only for a side-staged showcase subject.
@@ -75,10 +75,19 @@
 - Add complete community, support, issue, ownership, dependency, security, and release automation surfaces.
 - Pin GitHub Actions to reviewed commits and publish archives, checksums, and an SPDX SBOM from validated tags.
 
+## 0.4.8 — Store recovery and next-launch updates
+
+- Support exact signed Store adapters after isolated lifecycle verification.
+- Persist reviewed skin activation and sidebar repair for the next managed launch.
+- Recover ordinary Codex startup when Store updates remove a previously pinned executable.
+- Verify configured UI language and retry bounded transient CDP read failures.
+- Check installed file hashes against the candidate snapshot, including new recovery modules.
+- Complete remote CI and the public release checklist before tagging.
+
 ## 0.4.x — Runtime hardening
 
 - Add adapters only after exact-version isolated live verification.
-- Investigate an official packaged-app activation route without weakening AppX protections.
+- Extend the verified packaged-app activation route to additional exact Store builds.
 - Improve stale-session recovery and sanitized diagnostic export.
 - Add reduced-motion controls for runtime skin effects.
 

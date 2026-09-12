@@ -12,8 +12,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.7")
-        self.assertRegex(manifest["version"], r"^0\.4\.7(?:\+codex\.[0-9a-z-]+)?$")
+        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.8")
+        self.assertRegex(manifest["version"], r"^0\.4\.8(?:\+codex\.[0-9a-z-]+)?$")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
@@ -76,6 +76,10 @@ class PluginStructureTests(unittest.TestCase):
             "scripts/windows_runtime.py",
             "scripts/windows_skin_launcher.py",
             "scripts/windows_shortcut.py",
+            "scripts/windows_official_launcher.py",
+            "scripts/windows_pending_activation.py",
+            "scripts/windows_profile_repair.py",
+            "scripts/windows_profile_repair_handoff.py",
             "tests/test_windows_runtime.py",
             "tests/test_windows_skin_launcher.py",
             "docs/WINDOWS_RUNTIME_BETA.md",

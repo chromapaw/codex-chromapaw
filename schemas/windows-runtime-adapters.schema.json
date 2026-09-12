@@ -99,6 +99,24 @@
             "uniqueItems": true,
             "items": {"type": "string", "minLength": 1}
           },
+          "launchStrategy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": {"enum": ["direct", "appx-activation-manager"]},
+              "appUserModelId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.]+_[A-Za-z0-9]+![A-Za-z0-9.]+$"
+              }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"kind": {"const": "appx-activation-manager"}}},
+                "then": {"required": ["appUserModelId"]}
+              }
+            ]
+          },
           "testedTarget": {"type": "string", "minLength": 1}
         }
       }

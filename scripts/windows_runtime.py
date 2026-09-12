@@ -24,19 +24,29 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 CI job
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:  # pragma: no cover - hosted launcher has a parser fallback
+        tomllib = None  # type: ignore[assignment]
+
+try:
+    from .windows_official_launcher import official_powershell_environment, official_powershell_path
     from .cdp_client import CdpEndpoint, CdpError, inject_css, remove_css, verify_css
     from .skin_package import path_is_inside, safe_relative_path
     from .validate_skin_package import validate_package
 except ImportError:
+    from windows_official_launcher import official_powershell_environment, official_powershell_path
     from cdp_client import CdpEndpoint, CdpError, inject_css, remove_css, verify_css  # type: ignore
     from skin_package import path_is_inside, safe_relative_path  # type: ignore
     from validate_skin_package import validate_package  # type: ignore
 
 
-RUNTIME_VERSION = "0.4.10"
+RUNTIME_VERSION = "0.4.14"
 # Keep the compiled CSS identity stable across launcher-only runtime releases.
 # Increment this only when the compiler output intentionally changes.
-CSS_IDENTITY_VERSION = "0.4.8"
+CSS_IDENTITY_VERSION = "0.4.13"
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ADAPTERS = ROOT / "runtime" / "windows-adapters.json"
 ACTIVE_FILE = "active.json"
@@ -47,7 +57,32 @@ BACKGROUND_URL = re.compile(r"url\(\s*(['\"]?)\./background\.png\1\s*\)")
 VOLATILE_CONFIG_KEYS = {"SKY_CUA_NATIVE_PIPE_DIRECTORY"}
 APP_VERSION_PATTERN = re.compile(r"^\d+(?:\.\d+){3}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+LOCALE_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$")
+APP_USER_MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9.]+_[A-Za-z0-9]+![A-Za-z0-9.]+$")
 SENSITIVE_RESULT_KEYS = {"sessionToken", "session"}
+
+# Newer Codex versions render the application menu outside .app-header-tint.
+# Scope to the observed shell/menubar relationship, not CSS-module hash names.
+# The avatar overlay has neither this shell nor a menubar and remains untouched.
+MODERN_MENU_COMPAT_CSS = """
+/* ChromaPaw modern application-menu contrast compatibility */
+[data-app-shell-unified-tab-strip] > div:has(> [role="menubar"]) {
+  color: var(--chromapaw-titlebar-text, var(--chromapaw-ink)) !important;
+  background: var(--chromapaw-titlebar-surface, var(--chromapaw-surface-elevated)) !important;
+  border-bottom: 1px solid rgb(var(--chromapaw-ink-rgb) / 0.16) !important;
+}
+[data-app-shell-unified-tab-strip] > div:has(> [role="menubar"]) button {
+  color: var(--chromapaw-titlebar-text-secondary, var(--chromapaw-ink-secondary)) !important;
+}
+[data-app-shell-unified-tab-strip] > div:has(> [role="menubar"]) button:disabled {
+  color: var(--chromapaw-ink-muted) !important;
+  opacity: 0.62 !important;
+}
+[data-app-shell-unified-tab-strip] > div:has(> [role="menubar"]) button:is(:hover, :focus-visible, [aria-expanded="true"]) {
+  color: var(--chromapaw-titlebar-text, var(--chromapaw-ink)) !important;
+  background: rgb(var(--chromapaw-ink-rgb) / 0.10) !important;
+}
+"""
 
 ExecutableIdentityProbe = Callable[[Path], dict[str, Any]]
 
@@ -240,6 +275,21 @@ def load_adapters(path: Path) -> dict[str, Any]:
             raise RuntimeFailure(f"adapter {adapter_id} has invalid browser product prefixes")
         if not isinstance(adapter.get("testedTarget"), str) or not adapter["testedTarget"]:
             raise RuntimeFailure(f"adapter {adapter_id} must describe its tested target")
+        launch = adapter.get("launchStrategy", {"kind": "direct"})
+        if not isinstance(launch, dict) or launch.get("kind") not in {
+            "direct",
+            "appx-activation-manager",
+        }:
+            raise RuntimeFailure(f"adapter {adapter_id} has an invalid launch strategy")
+        if launch["kind"] == "appx-activation-manager":
+            app_user_model_id = launch.get("appUserModelId")
+            if (
+                not isinstance(app_user_model_id, str)
+                or APP_USER_MODEL_ID_PATTERN.fullmatch(app_user_model_id) is None
+            ):
+                raise RuntimeFailure(
+                    f"adapter {adapter_id} has an invalid AppX application user model id"
+                )
         identity = adapter.get("executableIdentity")
         if not isinstance(identity, dict):
             raise RuntimeFailure(f"adapter {adapter_id} must declare executableIdentity")
@@ -347,13 +397,13 @@ $signature = Get-AuthenticodeSignature -LiteralPath $path
 } | ConvertTo-Json -Compress
 """
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
-    environment = os.environ.copy()
+    environment = official_powershell_environment()
     environment["CHROMAPAW_IDENTITY_PATH"] = str(executable)
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         completed = subprocess.run(
             [
-                "powershell.exe",
+                official_powershell_path(),
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
@@ -528,7 +578,7 @@ def _discover_appx_install_locations() -> list[Path]:
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         completed = subprocess.run(
-            ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            [official_powershell_path(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -538,6 +588,7 @@ def _discover_appx_install_locations() -> list[Path]:
             timeout=8,
             check=False,
             creationflags=creation_flags,
+            env=official_powershell_environment(),
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -821,6 +872,7 @@ def compile_skin(package_dir: Path) -> dict[str, Any]:
     compiled, replacements = BACKGROUND_URL.subn(f'url("{data_uri}")', css)
     if replacements < 1:
         raise RuntimeFailure("stylesheet does not contain the expected package background URL")
+    compiled += MODERN_MENU_COMPAT_CSS
     compiled += (
         f"\n/* ChromaPaw runtime {CSS_IDENTITY_VERSION}; package {manifest['id']} */\n"
     )
@@ -993,8 +1045,157 @@ def inject_until_ready(
     )
 
 
+def inspect_runtime_locale(
+    endpoint: CdpEndpoint,
+    schemes: set[str],
+    requested_locale: str | None,
+) -> dict[str, Any]:
+    """Verify the main renderer language selected during Electron startup."""
+    requested = _normalise_locale(requested_locale)
+    if requested_locale is not None and requested is None:
+        raise RuntimeFailure("recorded Codex locale is invalid")
+    targets = endpoint.targets(schemes)
+    target = next(
+        (item for item in targets if "avatar-overlay" not in item.url.lower()),
+        None,
+    )
+    if target is None:
+        raise RuntimeFailure("no main Codex page target is available for locale verification")
+    value = endpoint.evaluate(
+        target,
+        """(() => ({
+  navigatorLanguage: navigator.language || "",
+  documentLanguage: document.documentElement.lang || ""
+}))()""",
+    )
+    if not isinstance(value, dict):
+        raise RuntimeFailure("Codex locale verification returned an invalid result")
+    navigator_locale = _normalise_locale(value.get("navigatorLanguage"))
+    document_locale = _normalise_locale(value.get("documentLanguage"))
+    matches = requested is None or (
+        navigator_locale is not None
+        and document_locale is not None
+        and navigator_locale.casefold() == requested.casefold()
+        and document_locale.casefold() == requested.casefold()
+    )
+    return {
+        "requested": requested,
+        "navigatorLanguage": navigator_locale,
+        "documentLanguage": document_locale,
+        "matches": matches,
+        "targetId": target.id,
+        "targetUrl": target.url,
+    }
+
+
+def verify_locale_until_ready(
+    endpoint: CdpEndpoint,
+    schemes: set[str],
+    requested_locale: str | None,
+    timeout: float,
+) -> dict[str, Any]:
+    if requested_locale is None:
+        return inspect_runtime_locale(endpoint, schemes, None)
+    deadline = time.monotonic() + timeout
+    last_result: dict[str, Any] | None = None
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            last_result = inspect_runtime_locale(endpoint, schemes, requested_locale)
+            if last_result["matches"]:
+                return last_result
+        except (CdpError, RuntimeFailure) as exc:
+            last_error = exc
+        time.sleep(0.25)
+    raise RuntimeFailure(
+        "Codex UI locale did not match the configured desktop language after launch: "
+        f"{last_error or last_result}"
+    )
+
+
 def _codex_config_path() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+
+
+def _normalise_locale(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().replace("_", "-")
+    if not value:
+        return None
+    if len(value) > 64 or LOCALE_PATTERN.fullmatch(value) is None:
+        return None
+    parts = value.split("-")
+    normalised = [parts[0].lower()]
+    for part in parts[1:]:
+        if len(part) == 2 and part.isalpha():
+            normalised.append(part.upper())
+        elif len(part) == 4 and part.isalpha():
+            normalised.append(part.title())
+        else:
+            normalised.append(part)
+    return "-".join(normalised)
+
+
+def _fallback_desktop_locale(text: str) -> object | None:
+    """Read one simple TOML string when the stdlib/Tomli parser is unavailable."""
+    in_desktop = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            in_desktop = stripped == "[desktop]"
+            continue
+        if not in_desktop:
+            continue
+        match = re.match(r"^localeOverride\s*=\s*(['\"])([^'\"]*)\1\s*(?:#.*)?$", stripped)
+        if match:
+            return match.group(2)
+    return None
+
+
+def codex_locale_status(config_path: Path | None = None) -> dict[str, Any]:
+    """Resolve the desktop locale without mutating Codex configuration."""
+    path = (config_path or _codex_config_path()).expanduser().resolve()
+    if not path.is_file():
+        return {
+            "requested": None,
+            "source": "codex-default",
+            "configPath": str(path),
+            "valid": True,
+        }
+    try:
+        if tomllib is not None:
+            with path.open("rb") as stream:
+                parsed = tomllib.load(stream)
+            desktop = parsed.get("desktop")
+            raw_locale = desktop.get("localeOverride") if isinstance(desktop, dict) else None
+        else:
+            raw_locale = _fallback_desktop_locale(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        return {
+            "requested": None,
+            "source": "codex-default",
+            "configPath": str(path),
+            "valid": False,
+            "error": f"Codex locale setting could not be read: {exc}",
+        }
+    locale = _normalise_locale(raw_locale)
+    if raw_locale is not None and locale is None:
+        return {
+            "requested": None,
+            "source": "codex-default",
+            "configPath": str(path),
+            "valid": False,
+            "error": "[desktop].localeOverride is not a valid locale identifier",
+        }
+    return {
+        "requested": locale,
+        "source": "desktop.localeOverride" if locale else "codex-default",
+        "configPath": str(path),
+        "valid": True,
+    }
 
 
 def create_backup(data_dir: Path, session_id: str, preflight: dict[str, Any]) -> dict[str, Any]:
@@ -1191,6 +1392,7 @@ def build_preflight(
     adapter = select_adapter(executable, adapters, require_enabled=require_enabled)
     compiled = compile_skin(package)
     version = detect_app_version(executable)
+    locale = codex_locale_status()
     return {
         "ok": True,
         "runtimeVersion": RUNTIME_VERSION,
@@ -1205,6 +1407,7 @@ def build_preflight(
         "activationEnabled": adapter.get("activationEnabled") is True,
         "executableIdentity": adapter["verifiedExecutableIdentity"],
         "allowedTargetSchemes": adapter["allowedTargetSchemes"],
+        "launchStrategy": adapter.get("launchStrategy", {"kind": "direct"}),
         "runningPids": running_pids(executable),
         "package": str(compiled["packageDir"]),
         "packageId": compiled["manifest"]["id"],
@@ -1214,6 +1417,7 @@ def build_preflight(
         "codexConfigWillBeModified": False,
         "transport": {"host": "127.0.0.1", "port": "ephemeral", "authenticated": False},
         "backgroundMonitor": {"enabled": True, "intervalSeconds": 1.0},
+        "locale": {**locale, "launchSwitch": f"--lang={locale['requested']}" if locale["requested"] else None},
     }
 
 
@@ -1232,20 +1436,156 @@ def _adapter_for_state(state: dict[str, Any]) -> dict[str, Any]:
     return adapter
 
 
+class _ActivatedApplicationProcess:
+    """Popen-shaped handle for a process returned by AppX activation."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def poll(self) -> int | None:
+        return None if self.pid in _windows_process_paths() else 0
+
+
+def _launch_packaged_codex(
+    executable: Path,
+    switches: list[str],
+    launch_strategy: dict[str, Any],
+) -> _ActivatedApplicationProcess:
+    expected = executable.expanduser().resolve()
+    # AppX activation can hand back an existing instance, especially when a
+    # profile switch is ignored. Never acquire ownership of a user's process.
+    existing_pids = set(_windows_process_paths())
+    registered = {
+        os.path.normcase(str((location / "app" / expected.name).resolve()))
+        for location in _discover_appx_install_locations()
+    }
+    if os.path.normcase(str(expected)) not in registered:
+        raise RuntimeFailure(
+            "the selected AppX Codex executable is not the currently registered package target"
+        )
+    app_user_model_id = launch_strategy.get("appUserModelId")
+    if (
+        not isinstance(app_user_model_id, str)
+        or APP_USER_MODEL_ID_PATTERN.fullmatch(app_user_model_id) is None
+    ):
+        raise RuntimeFailure("the AppX launch strategy has an invalid application user model id")
+
+    script = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$source = @'
+using System;
+using System.Runtime.InteropServices;
+[ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IApplicationActivationManager {
+    int ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string appUserModelId, [MarshalAs(UnmanagedType.LPWStr)] string arguments, uint options, out uint processId);
+    int ActivateForFile(IntPtr appUserModelId, IntPtr itemArray, IntPtr verb, out uint processId);
+    int ActivateForProtocol(IntPtr appUserModelId, IntPtr itemArray, out uint processId);
+}
+[ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
+class ApplicationActivationManager {}
+public static class ChromaPawPackagedAppLauncher {
+    public static uint Launch(string appUserModelId, string arguments) {
+        var manager = (IApplicationActivationManager)new ApplicationActivationManager();
+        uint processId;
+        int result = manager.ActivateApplication(appUserModelId, arguments, 0, out processId);
+        if (result < 0) Marshal.ThrowExceptionForHR(result);
+        return processId;
+    }
+}
+'@
+Add-Type -TypeDefinition $source -Language CSharp
+$pidValue = [ChromaPawPackagedAppLauncher]::Launch(
+    $env:CHROMAPAW_APP_USER_MODEL_ID,
+    $env:CHROMAPAW_APP_ARGUMENTS
+)
+[ordered]@{ pid = [int64]$pidValue } | ConvertTo-Json -Compress
+"""
+    environment = official_powershell_environment()
+    environment["CHROMAPAW_APP_USER_MODEL_ID"] = app_user_model_id
+    environment["CHROMAPAW_APP_ARGUMENTS"] = subprocess.list2cmdline(switches)
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    try:
+        completed = subprocess.run(
+            [
+                official_powershell_path(),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                encoded,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeFailure(f"packaged Codex activation failed: {exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or "PowerShell returned no diagnostic"
+        raise RuntimeFailure(f"packaged Codex activation failed: {detail}")
+    try:
+        result = json.loads(completed.stdout)
+        pid = result.get("pid") if isinstance(result, dict) else None
+    except json.JSONDecodeError as exc:
+        raise RuntimeFailure("packaged Codex activation returned invalid JSON") from exc
+    if not isinstance(pid, int) or pid <= 0:
+        raise RuntimeFailure("packaged Codex activation returned an invalid process id")
+    if pid in existing_pids:
+        raise RuntimeFailure(
+            "packaged Codex activation reused an existing process; "
+            "no CSS was applied and no existing process was terminated"
+        )
+
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        actual = _windows_process_paths().get(pid)
+        if actual is not None:
+            if os.path.normcase(str(actual)) != os.path.normcase(str(expected)):
+                raise RuntimeFailure(
+                    "packaged Codex activation returned a process from an unexpected executable"
+                )
+            return _ActivatedApplicationProcess(pid)
+        time.sleep(0.1)
+    raise RuntimeFailure("packaged Codex activation process did not become identity-verifiable")
+
+
 def _launch_codex(
     executable: Path,
     port: int,
     profile_dir: Path | None,
-) -> subprocess.Popen[bytes]:
-    args = [
-        str(executable),
+    locale: str | None = None,
+    adapter: dict[str, Any] | None = None,
+) -> subprocess.Popen[bytes] | _ActivatedApplicationProcess:
+    switches = [
         "--remote-debugging-address=127.0.0.1",
         f"--remote-debugging-port={port}",
         f"--remote-allow-origins=http://127.0.0.1:{port}",
     ]
+    normalised_locale = _normalise_locale(locale)
+    if locale is not None and normalised_locale is None:
+        raise RuntimeFailure("Codex locale launch value is invalid")
+    if normalised_locale is not None:
+        switches.append(f"--lang={normalised_locale}")
     if profile_dir is not None:
         profile_dir.mkdir(parents=True, exist_ok=True)
-        args.extend((f"--user-data-dir={profile_dir}", "--start-minimized"))
+        switches.extend((f"--user-data-dir={profile_dir}", "--start-minimized"))
+    launch_strategy = (
+        adapter.get("launchStrategy", {"kind": "direct"})
+        if isinstance(adapter, dict)
+        else {"kind": "direct"}
+    )
+    if launch_strategy.get("kind") == "appx-activation-manager":
+        return _launch_packaged_codex(executable, switches, launch_strategy)
+
+    args = [str(executable), *switches]
     creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
         return subprocess.Popen(
@@ -1543,7 +1883,21 @@ def activate_runtime(
         state: dict[str, Any] | None = None
         css_applied = False
         try:
-            process = _launch_codex(executable.expanduser().resolve(), port, profile_dir)
+            locale_status = preflight.get("locale")
+            if not isinstance(locale_status, dict):
+                locale_status = {
+                    "requested": None,
+                    "source": "codex-default",
+                    "configPath": str(_codex_config_path().expanduser().resolve()),
+                    "valid": True,
+                }
+            process = _launch_codex(
+                executable.expanduser().resolve(),
+                port,
+                profile_dir,
+                locale_status["requested"] if locale_status["valid"] else None,
+                adapter,
+            )
             browser = wait_for_endpoint(endpoint, adapter, wait_seconds)
             if process.poll() is not None:
                 raise RuntimeFailure("runtime-launched Codex exited before activation completed")
@@ -1556,6 +1910,14 @@ def activate_runtime(
                 settle_seconds=min(10.0, max(2.0, wait_seconds / 3)),
             )
             css_applied = True
+            locale_verification = None
+            if locale_status["valid"] and locale_status["requested"]:
+                locale_verification = verify_locale_until_ready(
+                    endpoint,
+                    schemes,
+                    locale_status["requested"],
+                    min(8.0, max(2.0, wait_seconds / 3)),
+                )
             if process is None:  # pragma: no cover - guarded by the launch call
                 raise RuntimeFailure("runtime launch returned no process")
             process_creation_time = _record_process_creation_time(process.pid, label="Codex")
@@ -1573,6 +1935,7 @@ def activate_runtime(
                 "executableHash": preflight["executableHash"],
                 "appVersion": preflight["appVersion"],
                 "adapterId": preflight["adapterId"],
+                "launchStrategy": preflight.get("launchStrategy", {"kind": "direct"}),
                 "adapterFile": preflight["adapterFile"],
                 "adapterFileHash": preflight["adapterFileHash"],
                 "port": port,
@@ -1583,6 +1946,13 @@ def activate_runtime(
                 "manifestHash": preflight["manifestHash"],
                 "cssHash": preflight["cssHash"],
                 "profileDir": str(profile_dir.resolve()) if profile_dir is not None else None,
+                "locale": {
+                    **locale_status,
+                    "launchSwitchApplied": bool(
+                        locale_status["valid"] and locale_status["requested"]
+                    ),
+                    "verification": locale_verification,
+                },
                 "backupDir": backup["backupDir"],
                 "appliedTargets": applied,
                 "applicationFilesModified": False,
@@ -1702,6 +2072,36 @@ def activate_runtime(
         return state
 
 
+def _verify_renderer_readback(
+    endpoint: CdpEndpoint, state: dict[str, Any], schemes: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, bool]:
+    """Retry only timed-out readbacks, never mutations or identity failures."""
+    for attempt in range(3):
+        try:
+            checks = verify_css(
+                endpoint, str(state["cssHash"]), str(state["sessionToken"]), schemes
+            )
+            locale_state = state.get("locale")
+            locale_check = None
+            locale_ok = True
+            if isinstance(locale_state, dict) and isinstance(locale_state.get("requested"), str):
+                current_locale = codex_locale_status()
+                locale_check = inspect_runtime_locale(
+                    endpoint, schemes, str(locale_state["requested"])
+                )
+                locale_ok = bool(
+                    current_locale["valid"]
+                    and current_locale["requested"] == locale_state["requested"]
+                    and locale_check["matches"]
+                )
+            return checks, locale_check, locale_ok
+        except CdpError as exc:
+            if attempt == 2 or not isinstance(exc.__cause__, TimeoutError):
+                raise
+            time.sleep(0.4)
+    raise AssertionError("renderer readback retry exhausted without a result")
+
+
 def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
     with runtime_lock(data_dir):
         state = _read_active(data_dir)
@@ -1745,10 +2145,8 @@ def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
                 8.0,
                 settle_seconds=0.5,
             )
-        checks = verify_css(
-            endpoint, str(state["cssHash"]), str(state["sessionToken"]), schemes
-        )
-        ok = _results_pass(checks, "matches")
+        checks, locale_check, locale_ok = _verify_renderer_readback(endpoint, state, schemes)
+        ok = _results_pass(checks, "matches") and locale_ok
         result = {
             "ok": ok,
             "status": "active" if ok else "verification-failed",
@@ -1763,6 +2161,8 @@ def verify_runtime(data_dir: Path, *, repair: bool = False) -> dict[str, Any]:
             "monitorIdentity": monitor_identity,
             "transport": {"host": "127.0.0.1", "port": state["port"]},
             "targets": checks,
+            "locale": locale_check,
+            "localeMatches": locale_ok,
             "repaired": repair,
             "verifiedAt": utc_now(),
         }
@@ -2214,6 +2614,7 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
         "adapterIdentityMatches": None,
         "browserIdentityMatches": None,
         "styleOwnershipMatches": None,
+        "localeSettingMatches": True,
     }
     errors: list[str] = []
     adapter: dict[str, Any] | None = None
@@ -2244,6 +2645,7 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
             errors.append(str(exc))
     endpoint_reachable = False
     style_checks: list[dict[str, Any]] = []
+    locale_check: dict[str, Any] | None = None
     try:
         endpoint = CdpEndpoint(int(state["port"]), timeout=1.0)
         browser = endpoint.version()
@@ -2266,6 +2668,23 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
                 set(state["allowedTargetSchemes"]),
             )
             continuity["styleOwnershipMatches"] = _results_pass(style_checks, "matches")
+            locale_state = state.get("locale")
+            if isinstance(locale_state, dict) and isinstance(
+                locale_state.get("requested"), str
+            ):
+                current_locale = codex_locale_status()
+                locale_check = inspect_runtime_locale(
+                    endpoint,
+                    set(state["allowedTargetSchemes"]),
+                    str(locale_state["requested"]),
+                )
+                continuity["localeSettingMatches"] = bool(
+                    current_locale["valid"]
+                    and current_locale["requested"] == locale_state["requested"]
+                    and locale_check["matches"]
+                )
+                if continuity["localeSettingMatches"] is not True:
+                    errors.append("Codex desktop locale changed or no longer matches the UI")
     except (CdpError, OSError, RuntimeFailure, ValueError, TypeError) as exc:
         errors.append(str(exc))
 
@@ -2293,6 +2712,7 @@ def runtime_status(data_dir: Path) -> dict[str, Any]:
         "endpointReachable": endpoint_reachable,
         "continuity": continuity,
         "targets": style_checks,
+        "locale": locale_check,
         "errors": errors,
         "transport": {"host": "127.0.0.1", "port": state.get("port")},
     }
