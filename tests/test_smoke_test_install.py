@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,13 +17,56 @@ from smoke_test_install import (  # noqa: E402
     PLUGIN_NAME,
     SmokeTestError,
     installed_plugin_from_result,
+    isolated_environment,
     marketplace_plugin_root,
     stage_local_marketplace,
     verify_installed_content,
+    verify_plugin_listing,
 )
 
 
 class SmokeTestInstallTests(unittest.TestCase):
+    def installed_listing(self, **changes: object) -> str:
+        entry = {
+            "pluginId": "codex-chromapaw@chromapaw",
+            "name": PLUGIN_NAME,
+            "marketplaceName": "chromapaw",
+            "version": "0.4.8",
+            "installed": True,
+            "enabled": True,
+        }
+        entry.update(changes)
+        return json.dumps({"installed": [entry], "available": []})
+
+    def test_structured_listing_accepts_exact_enabled_version(self) -> None:
+        verify_plugin_listing(self.installed_listing(), "0.4.8")
+
+    def test_structured_listing_rejects_false_success(self) -> None:
+        for change in (
+            {"version": "0.4.7"}, {"enabled": False}, {"installed": False},
+            {"enabled": "true"}, {"installed": 1}, {"name": "other"},
+            {"marketplaceName": "other"}, {"pluginId": "codex-chromapaw@other"},
+        ):
+            with self.subTest(change=change), self.assertRaises(SmokeTestError):
+                verify_plugin_listing(self.installed_listing(**change), "0.4.8")
+
+    def test_structured_listing_rejects_invalid_missing_and_duplicate_entries(self) -> None:
+        entry = json.loads(self.installed_listing())["installed"][0]
+        for value in (
+            "not json", "[]", "{}", '{"installed": {}}',
+            json.dumps({"installed": [], "available": [entry]}),
+            json.dumps({"installed": [entry, entry]}),
+        ):
+            with self.subTest(value=value), self.assertRaises(SmokeTestError):
+                verify_plugin_listing(value, "0.4.8")
+
+    def test_isolated_environment_removes_external_dependency_override(self) -> None:
+        with mock.patch.dict(os.environ, {"CHROMAPAW_HATCH_PET_DIR": "external-skill"}):
+            env = isolated_environment(Path("isolated-home"))
+            self.assertNotIn("CHROMAPAW_HATCH_PET_DIR", env)
+            self.assertEqual(env["CODEX_HOME"], "isolated-home")
+            self.assertEqual(os.environ["CHROMAPAW_HATCH_PET_DIR"], "external-skill")
+
     def test_local_marketplace_stages_current_plugin_without_worktree_noise(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             staging = Path(temporary) / "marketplace"

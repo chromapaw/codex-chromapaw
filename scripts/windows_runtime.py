@@ -628,6 +628,11 @@ def discover_executables(adapter_path: Path = DEFAULT_ADAPTERS) -> list[dict[str
             adapter_id = adapter.get("id")
             activation_enabled = adapter.get("activationEnabled") is True
             identity = adapter.get("verifiedExecutableIdentity")
+            if not activation_enabled:
+                reason = (
+                    f"adapter {adapter_id} recognizes Codex {version}, but activation is disabled "
+                    "until isolated live verification passes"
+                )
         except RuntimeFailure as exc:
             reason = str(exc)
             identity = None

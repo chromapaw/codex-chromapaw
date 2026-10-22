@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.9 — Maintenance candidate (not released)
+
+- Add isolated installation checks for Codex CLI 0.163.0 on Linux, Windows and macOS, retain the 0.144.2 baseline, and move the release installation gate to the tested stable CLI.
+- Check the exact plugin identity, version and boolean installed/enabled state in structured CLI output. Isolate the smoke test from a caller's external hatch-pet override and report the tested CLI version.
+- Record signed Store Codex 26.1016.6573.0 as a hash-pinned, discovery-only candidate. Explain disabled activation in discovery results; no new live skin support is claimed or enabled.
+
 ## 0.4.8 — 2026-09-12
 
 - Normalize recovery-test fixture paths so Windows short temporary paths and macOS `/var` aliases exercise the same identity checks as resolved runtime paths.

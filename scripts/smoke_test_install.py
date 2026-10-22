@@ -172,6 +172,43 @@ def write_mock_hatch_pet(codex_home: Path) -> Path:
     return root
 
 
+def isolated_environment(codex_home: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(codex_home)
+    # An explicit dependency override must not leak a real skill into the
+    # missing-dependency test or inspect files outside the isolated fixture.
+    env.pop("CHROMAPAW_HATCH_PET_DIR", None)
+    return env
+
+
+def verify_plugin_listing(output: str, expected_version: str) -> None:
+    """Verify the exact installed plugin, not another entry's display text."""
+    try:
+        listing = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise SmokeTestError("plugin list did not return valid JSON") from exc
+    if not isinstance(listing, dict) or not isinstance(listing.get("installed"), list):
+        raise SmokeTestError("plugin list JSON omitted the installed array")
+    matches = [
+        entry for entry in listing["installed"]
+        if isinstance(entry, dict)
+        and entry.get("pluginId") == f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
+    ]
+    if len(matches) != 1:
+        raise SmokeTestError("plugin list must contain exactly one installed ChromaPaw entry")
+    entry = matches[0]
+    if (
+        entry.get("name") != PLUGIN_NAME
+        or entry.get("marketplaceName") != MARKETPLACE_NAME
+        or entry.get("installed") is not True
+        or entry.get("enabled") is not True
+        or entry.get("version") != expected_version
+    ):
+        raise SmokeTestError(
+            "plugin list did not confirm the selected ChromaPaw version is installed and enabled"
+        )
+
+
 def plugin_file_hashes(plugin_root: Path) -> dict[str, str]:
     """Inventory the distributable snapshot without following linked content."""
     hashes: dict[str, str] = {}
@@ -240,8 +277,8 @@ def smoke_test(
     ref: str | None,
     codex_home: Path,
 ) -> dict[str, Any]:
-    env = os.environ.copy()
-    env["CODEX_HOME"] = str(codex_home)
+    env = isolated_environment(codex_home)
+    cli_version = run([codex, "--version"], env).stdout.strip()
 
     marketplace_command = [codex, "plugin", "marketplace", "add", source, "--json"]
     if ref:
@@ -261,9 +298,10 @@ def smoke_test(
         [codex, "plugin", "add", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--json"],
         env,
     )
-    listing = run([codex, "plugin", "list"], env)
-    if PLUGIN_NAME not in listing.stdout or "installed, enabled" not in listing.stdout:
-        raise SmokeTestError("plugin list did not report ChromaPaw as installed and enabled")
+    listing = run(
+        [codex, "plugin", "list", "--marketplace", MARKETPLACE_NAME, "--json"], env
+    )
+    verify_plugin_listing(listing.stdout, expected_version)
 
     plugin_root, installed_version = installed_plugin_from_result(
         installation, codex_home, expected_version
@@ -297,6 +335,7 @@ def smoke_test(
 
     return {
         "ok": True,
+        "codexVersion": cli_version,
         "codexHome": str(codex_home),
         "marketplace": MARKETPLACE_NAME,
         "plugin": PLUGIN_NAME,

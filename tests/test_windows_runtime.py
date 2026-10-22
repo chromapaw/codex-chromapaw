@@ -32,6 +32,7 @@ from windows_runtime import (  # noqa: E402
     close_matching_codex_processes,
     compile_skin,
     detect_app_version,
+    discover_executables,
     load_adapters,
     monitor_runtime,
     redact_result,
@@ -1410,6 +1411,41 @@ class WindowsRuntimeTests(unittest.TestCase):
             with self.assertRaises(RuntimeFailure) as context:
                 select_adapter(executable)
             self.assertIn("activation is disabled", str(context.exception))
+
+    def test_october_store_candidate_remains_discovery_only(self) -> None:
+        identity = {
+            **CURRENT_APPX_EXECUTABLE_IDENTITY,
+            "fileVersion": "155.0.8059.80",
+            "productVersion": "155.0.8059.80",
+            "sha256": "602a21169fa011cf48997dbc07a0ffcdc11058caa5dc992e534876e8cb6f9a4e",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "app-26.1016.6573.0" / "ChatGPT.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture")
+            adapter = select_adapter(
+                executable, require_enabled=False, _identity_probe=lambda _path: identity
+            )
+            self.assertFalse(adapter["activationEnabled"])
+            self.assertEqual(adapter["id"], "chatgpt-electron-26-1016-6573-appx")
+            with self.assertRaisesRegex(RuntimeFailure, "activation is disabled"):
+                select_adapter(executable, _identity_probe=lambda _path: identity)
+            with self.assertRaisesRegex(RuntimeFailure, "sha256"):
+                select_adapter(
+                    executable, require_enabled=False,
+                    _identity_probe=lambda _path: {**identity, "sha256": "0" * 64},
+                )
+            with (
+                mock.patch.dict(os.environ, {"CHROMAPAW_CODEX_EXE": str(executable)}),
+                mock.patch("windows_runtime.Path.glob", return_value=[]),
+                mock.patch("windows_runtime._discover_appx_install_locations", return_value=[]),
+                mock.patch("windows_runtime.probe_executable_identity", return_value=identity),
+            ):
+                discovered = discover_executables()
+            self.assertEqual(len(discovered), 1)
+            self.assertFalse(discovered[0]["activationEnabled"])
+            self.assertIn("activation is disabled", discovered[0]["reason"])
+            self.assertEqual(discovered[0]["executableIdentity"]["sha256"], identity["sha256"])
 
     def test_matching_path_without_matching_pe_identity_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

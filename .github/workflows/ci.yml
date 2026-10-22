@@ -44,3 +44,39 @@ jobs:
 
       - name: Run release checks
         run: python scripts/release_check.py
+
+  plugin-install:
+    name: ${{ matrix.os }} / Codex CLI ${{ matrix.codex }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            codex: "0.144.2"
+          - os: ubuntu-latest
+            codex: "0.163.0"
+          - os: windows-latest
+            codex: "0.163.0"
+          - os: macos-latest
+            codex: "0.163.0"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Install tested Codex CLI
+        run: npm install --global @openai/codex@${{ matrix.codex }} --registry https://registry.npmjs.org
+
+      - name: Verify isolated marketplace installation
+        run: python scripts/smoke_test_install.py --source . --ref= --json

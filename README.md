@@ -10,6 +10,8 @@ Turn one uploaded image into an image-specific Codex skin or animated pet.
 
 > Version 0.4.8 adds reviewed next-launch skin activation, signed Store startup recovery, project-sidebar repair, and verified language synchronization. Installation checks compare package content as well as versions. Package generation remains separate from installation and live skin activation; ChromaPaw does not claim an official OpenAI desktop skin API.
 
+The 0.4.9 maintenance candidate adds Codex CLI 0.163.0 installation gates while retaining the 0.144.2 baseline. Store Codex `26.1016.6573.0` is **discovery-only**, not skin-activation supported. See the [2026-10-22 compatibility review](docs/COMPATIBILITY_2026-10-22.md); use [GitHub Releases](https://github.com/chromapaw/codex-chromapaw/releases/latest) for the latest published version.
+
 > [!IMPORTANT]
 > ChromaPaw is a community beta. Skin and pet package generation is portable, but live skin activation is not: Windows activation is experimental and exact-version gated, while macOS activation is not implemented.
 

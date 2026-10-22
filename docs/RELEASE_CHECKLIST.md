@@ -51,7 +51,7 @@ python scripts/smoke_test_install.py --source . --ref= --json
 6. Install or explicitly point to a real compatible `hatch-pet` dependency before pet generation. The mock contract used by the repository smoke test proves dependency discovery only; it is not pet generation or visual-QA evidence.
 7. Generate and validate one pet and one skin from fresh references.
 
-The automated tag workflow currently pins `@openai/codex@0.144.2` for the marketplace installation gate. Update that pin deliberately when a newer CLI has passed local and pull-request compatibility testing.
+The automated tag workflow pins `@openai/codex@0.163.0` for the marketplace installation gate. Pull requests also test the `0.144.2` baseline on Linux and `0.163.0` on Linux, Windows and macOS. Update the release pin and CI matrix together only after isolated installation passes; the smoke result records the exact CLI version, installed/enabled entry and package hashes. Never infer live desktop skin compatibility from CLI installation.
 8. On an enabled Windows adapter, activate the skin, close Codex, relaunch from both ChromaPaw shortcuts, and restore.
 9. Confirm the ordinary application shortcut still opens the default appearance.
 
