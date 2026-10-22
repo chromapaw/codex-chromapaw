@@ -86,6 +86,8 @@
 
 ## 0.4.x — Runtime hardening
 
+The 0.4.9 maintenance candidate refreshes CLI installation coverage and records the October Store build as discovery-only. Live adapter acceptance remains a separate gate.
+
 - Add adapters only after exact-version isolated live verification.
 - Extend the verified packaged-app activation route to additional exact Store builds.
 - Improve stale-session recovery and sanitized diagnostic export.

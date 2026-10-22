@@ -128,6 +128,32 @@
       "allowedTargetSchemes": ["app"],
       "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
       "testedTarget": "Official signed Store build: isolated main/avatar CSS, zh-CN, menu contrast and project-list screenshots, transparent pet, CSS removal/repair and owned-process cleanup passed on 2026-09-06"
+    },
+    {
+      "id": "chatgpt-electron-26-1016-6573-appx",
+      "appVersion": "26.1016.6573.0",
+      "executableName": "ChatGPT.exe",
+      "activationEnabled": false,
+      "executableIdentity": {
+        "productName": "Codex",
+        "companyName": "OpenAI OpCo, LLC",
+        "fileDescription": "Codex",
+        "originalFilename": "chrome.exe",
+        "internalName": "chrome_exe",
+        "fileVersion": "155.0.8059.80",
+        "allowedSha256": ["602a21169fa011cf48997dbc07a0ffcdc11058caa5dc992e534876e8cb6f9a4e"],
+        "signature": {
+          "allowedStatuses": ["Valid"],
+          "signerSubjectContains": "OpenAI OpCo, LLC"
+        }
+      },
+      "launchStrategy": {
+        "kind": "appx-activation-manager",
+        "appUserModelId": "OpenAI.Codex_2p2nqsd0c76g0!App"
+      },
+      "allowedTargetSchemes": ["app"],
+      "browserProductPrefixes": ["Chrome/", "HeadlessChrome/"],
+      "testedTarget": "Read-only discovery on 2026-10-22 verified PE metadata, the valid OpenAI signature and exact SHA-256. No isolated live activation, visual or restore acceptance has been performed; activation remains disabled."
     }
   ]
 }

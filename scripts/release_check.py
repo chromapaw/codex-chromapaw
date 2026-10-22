@@ -16,6 +16,7 @@ from jsonschema.exceptions import SchemaError
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TESTED_CODEX_CLI = "0.163.0"
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 SKILLS = (
     "create-chromapaw-pet",
@@ -145,12 +146,22 @@ def validate_repository_policies() -> None:
         "scripts/smoke_test_install.py",
         '--ref "${RELEASE_TAG}"',
         "actions/setup-node@",
-        "@openai/codex@0.144.2",
+        f"@openai/codex@{TESTED_CODEX_CLI}",
         "sbom-action@",
         "gh release create",
     ):
         if marker not in release_workflow:
             raise ReleaseCheckError(f"release workflow is missing {marker}")
+
+    ci_workflow = (github_root / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    for marker in (
+        "plugin-install:",
+        f'codex: "{TESTED_CODEX_CLI}"',
+        'codex: "0.144.2"',
+        "scripts/smoke_test_install.py --source . --ref= --json",
+    ):
+        if marker not in ci_workflow:
+            raise ReleaseCheckError(f"CI workflow is missing installation compatibility gate {marker}")
 
 
 def validate_repository() -> str:

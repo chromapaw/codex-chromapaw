@@ -12,8 +12,8 @@ class PluginStructureTests(unittest.TestCase):
     def test_manifest_and_skills_exist(self) -> None:
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], ROOT.name)
-        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.8")
-        self.assertRegex(manifest["version"], r"^0\.4\.8(?:\+codex\.[0-9a-z-]+)?$")
+        self.assertEqual(manifest["version"].split("+", 1)[0], "0.4.9")
+        self.assertRegex(manifest["version"], r"^0\.4\.9(?:\+codex\.[0-9a-z-]+)?$")
         self.assertEqual(manifest["license"], "Apache-2.0")
         self.assertEqual(manifest["skills"], "./skills/")
         for name in ("create-chromapaw-pet", "create-chromapaw-skin", "manage-chromapaw"):
